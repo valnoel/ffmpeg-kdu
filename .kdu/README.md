@@ -11,10 +11,23 @@ which is considered `upstream`.
 
 ## Usage
 
+### Relationship with Kakadu demo apps
+
+The patchset mimics the `kdu_compress` and `kdu_expand` CLI applications
+provided with the Kakadu SDK.
+
+For example:
+
+`kdu_compress -i image.png Cmodes=HT Creversible=yes -o image.j2c`
+
+becomes
+
+`ffmpeg -i image.png -c:v libkdu -kdu_params "Cmodes=HT Creversible=yes" image.j2c`
+
 ### Encoding
 
 ```sh
-ffmpeg -i <input file> -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_params param_1;param_2;...] <output file>
+ffmpeg -i <input file> -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_params "param_1 param_2 ..."] <output file>
 
   kdu_option:
     -kdu_rate -|<bits/pel>,<bits/pel>,...
@@ -29,7 +42,7 @@ ffmpeg -i <input file> -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_param
 ### Decoding
 
 ```sh
-  ffmpeg -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_params param_1;param_2;...] -i <input file> <output file>
+  ffmpeg -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_params "param_1 param_2 ..."] -i <input file> <output file>
 
   kdu_option:
     -kdu_reduce <discard levels>
