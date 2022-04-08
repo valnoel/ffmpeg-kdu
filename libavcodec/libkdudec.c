@@ -27,13 +27,55 @@ static av_cold int libkdu_decode_init(AVCodecContext *avctx)
 
 static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
 {
+    uint8_t *buf = avpkt->data;
+    int buf_size = avpkt->size;
+    AVFrame *picture = data;
     LibKduContext *ctx = avctx->priv_data;
-    int ret;
 
-    // TODO decode frame stripes
+    int width, height, num_comps, ret;
+    unsigned char *pixels;
+    int* stripe_heights;
+    int pull_strip_should_stop = 0;
+
+    kdu_compressed_source *source;
+    kdu_codestream *code_stream;
+    kdu_stripe_decompressor *decompressor;
+
+    if((ret = kdu_compressed_source_buffered_new(buf, buf_size, &source))) {
+        goto done;
+    }
+
+    if((ret = kdu_codestream_create_from_source(source, &code_stream))) {
+        goto done;
+    }
+
+    kdu_codestream_get_size(code_stream, 0, &height, &width);
+
+    num_comps = kdu_codestream_get_num_components(code_stream);
+
+    if((ret = kdu_stripe_decompressor_new(&decompressor))) {
+        goto done;
+    }
+
+    pixels = av_malloc(width * height * num_comps);
+    stripe_heights = av_malloc(num_comps * sizeof(int));
+
+    for (int i = 0; i < num_comps; ++i) {
+        stripe_heights[i] = height;
+    }
+
+    while(!pull_strip_should_stop) {
+        pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, pixels, stripe_heights);
+    }
+
+    ret = kdu_stripe_decompressor_finish(decompressor);
 
 done:
-    // TODO clean
+    av_free(pixels);
+    av_free(stripe_heights);
+    kdu_stripe_decompressor_delete(decompressor);
+    kdu_codestream_delete(code_stream);
+    kdu_compressed_source_buffered_delete(source);
     return ret;
 }
 
