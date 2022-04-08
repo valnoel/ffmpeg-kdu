@@ -242,6 +242,7 @@ External library support:
   --enable-libilbc         enable iLBC de/encoding via libilbc [no]
   --enable-libjack         enable JACK audio sound server [no]
   --enable-libjxl          enable JPEG XL de/encoding via libjxl [no]
+  --enable-libkdu          enable JPEG 2000 de/encoding via Kakadu [no]
   --enable-libklvanc       enable Kernel Labs VANC processing [no]
   --enable-libkvazaar      enable HEVC encoding via libkvazaar [no]
   --enable-liblensfun      enable lensfun lens correction [no]
@@ -1837,6 +1838,7 @@ EXTERNAL_LIBRARY_LIST="
     libilbc
     libjack
     libjxl
+    libkdu
     libklvanc
     libkvazaar
     libmodplug
@@ -6556,6 +6558,8 @@ enabled libgsm            && { for gsm_hdr in "gsm.h" "gsm/gsm.h"; do
 enabled libilbc           && require libilbc ilbc.h WebRtcIlbcfix_InitDecode -lilbc $pthreads_extralibs
 enabled libjxl            && require_pkg_config libjxl "libjxl >= 0.7.0" jxl/decode.h JxlDecoderVersion &&
                              require_pkg_config libjxl_threads "libjxl_threads >= 0.7.0" jxl/thread_parallel_runner.h JxlThreadParallelRunner
+enabled libkdu            && { require_headers kakadu/kdu_ubiquitous.h -xc++ &&
+                               require libkduc kduc.h kdu_codestream_delete -lkduc -lkdu -lkdu_aux -lstdc++ -lm; }
 enabled libklvanc         && require libklvanc libklvanc/vanc.h klvanc_context_create -lklvanc
 enabled libkvazaar        && require_pkg_config libkvazaar "kvazaar >= 0.8.1" kvazaar.h kvz_api_get
 enabled liblensfun        && require_pkg_config liblensfun lensfun lensfun.h lf_db_new
