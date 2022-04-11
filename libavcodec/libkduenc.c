@@ -42,14 +42,14 @@ static const AVOption options[] = {
 };
 
 static const AVClass kakadu_encoder_class = {
-    .class_name = "libkduenc",
+    .class_name = "libkdu",
     .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
 const FFCodec ff_libkdu_encoder = {
-    .p.name         = "libkduenc",
+    .p.name         = "libkdu",
     .p.long_name    = NULL_IF_CONFIG_SMALL("Kakadu JPEG 2000 Encoder"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_JPEG2000,
