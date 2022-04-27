@@ -50,6 +50,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     kdu_siz_params *siz_params;
     mem_compressed_target *target;
     kdu_stripe_compressor *encoder;
+    char* kdu_param;
 
     uint8_t* data;
     uint8_t* buffer;
@@ -84,8 +85,14 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     };
 
-    if((ret = kdu_codestream_parse_params(code_stream, "Cmodes=HT"))) {
-        goto done;
+    if (ctx->kdu_params) {
+        kdu_param = strtok(ctx->kdu_params, " ");
+        while(kdu_param != NULL) {
+            if((ret = kdu_codestream_parse_params(code_stream, kdu_param))) {
+                goto done;
+            }
+            kdu_param = strtok(NULL, " ");
+        }
     }
 
     // Create encoder
@@ -126,6 +133,7 @@ done:
 #define OFFSET(x) offsetof(LibKduContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
+    { "kdu_params", "KDU generic arguments", OFFSET(kdu_params), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = VE },
     { NULL },
 };
 
