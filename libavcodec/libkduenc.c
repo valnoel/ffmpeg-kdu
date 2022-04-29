@@ -12,8 +12,12 @@
 
 #include <kduc.h>
 
+#define KAKADU_MAX_GENERIC_PARAMS 16
+
 typedef struct LibKduContext {
     AVClass *avclass;
+    char *kdu_params;
+    const char* kdu_generic_params[KAKADU_MAX_GENERIC_PARAMS];
 } LibKduContext;
 
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
@@ -35,8 +39,16 @@ static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame
 static av_cold int libkdu_encode_init(AVCodecContext *avctx)
 {
     LibKduContext *ctx = avctx->priv_data;
+    char* kdu_param;
+    int i = 0;
 
-    // TODO set encoding parameters
+    if (ctx->kdu_params) {
+        kdu_param = strtok(ctx->kdu_params, " ");
+        while(kdu_param != NULL) {
+            ctx->kdu_generic_params[i++] = av_strdup(kdu_param);
+            kdu_param = strtok(NULL, " ");
+        }
+    }
 
     return 0;
 }
@@ -50,7 +62,6 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     kdu_siz_params *siz_params;
     mem_compressed_target *target;
     kdu_stripe_compressor *encoder;
-    char* kdu_param;
     kdu_stripe_compressor_options encoder_opts;
 
     uint8_t* data;
@@ -60,6 +71,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
 
     int stop;
     int ret;
+    int i;
 
     if ((ret = kdu_siz_params_new(&siz_params))) {
         goto done;
@@ -86,13 +98,11 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     };
 
-    if (ctx->kdu_params) {
-        kdu_param = strtok(ctx->kdu_params, " ");
-        while(kdu_param != NULL) {
-            if((ret = kdu_codestream_parse_params(code_stream, kdu_param))) {
+    for (i = 0; i < KAKADU_MAX_GENERIC_PARAMS; ++i) {
+        if (ctx->kdu_generic_params[i] != NULL) {
+            if((ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i]))) {
                 goto done;
             }
-            kdu_param = strtok(NULL, " ");
         }
     }
 
@@ -101,8 +111,8 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     }
 
-    stripe_heights = av_malloc(pix_fmt_desc->nb_components);
-    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
+    stripe_heights = av_malloc(pix_fmt_desc->nb_components * sizeof(int));
+    for (i = 0; i < pix_fmt_desc->nb_components; ++i) {
         stripe_heights[i] = avctx->height;
     }
 
@@ -125,6 +135,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     *got_packet = 1;
 
 done:
+    av_free(stripe_heights);
     av_free(data);
     kdu_stripe_compressor_delete(encoder);
     kdu_codestream_delete(code_stream);
