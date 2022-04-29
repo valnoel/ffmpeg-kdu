@@ -51,6 +51,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     mem_compressed_target *target;
     kdu_stripe_compressor *encoder;
     char* kdu_param;
+    kdu_stripe_compressor_options encoder_opts;
 
     uint8_t* data;
     uint8_t* buffer;
@@ -105,7 +106,9 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         stripe_heights[i] = avctx->height;
     }
 
-    kdu_stripe_compressor_start(encoder, code_stream);
+    kdu_stripe_compressor_options_init(&encoder_opts);
+
+    kdu_stripe_compressor_start(encoder, code_stream, &encoder_opts);
 
     stop = 0;
     while (!stop) {
