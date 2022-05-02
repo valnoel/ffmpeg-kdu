@@ -74,12 +74,11 @@ static av_cold int libkdu_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
+static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *avpkt)
 {
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     LibKduContext *ctx = avctx->priv_data;
-    AVFrame *picture = data;
     uint8_t* buffer;
 
     int width, height, num_comps, nb_pixels, bytes_per_pixel, ret;
@@ -128,7 +127,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     }
 
     // Initialize the output picture buffer
-    if ((ret = ff_get_buffer(avctx, picture, 0)) < 0) {
+    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0) {
         goto done;
     }
 
@@ -157,7 +156,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     switch (bytes_per_pixel) {
         case 1:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             } else {
                 av_log(avctx, AV_LOG_ERROR, "Copy to 8 unimplemented!");
                 ret = 0;
@@ -166,7 +165,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
             break;
         case 2:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             } else {
                 av_log(avctx, AV_LOG_ERROR, "Copy to 16 unimplemented!");
                 ret = 0;
@@ -176,7 +175,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
         case 3:
         case 4:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             }
             break;
         case 6:
@@ -200,8 +199,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
 
     *got_frame = 1;
 
-    picture->pict_type = AV_PICTURE_TYPE_I;
-    picture->key_frame = 1;
+    frame->pict_type = AV_PICTURE_TYPE_I;
+    frame->key_frame = 1;
 
     ret = buf_size;
 
@@ -239,7 +238,7 @@ const FFCodec ff_libkdu_decoder = {
     .p.id           = AV_CODEC_ID_JPEG2000,
     .priv_data_size = sizeof(LibKduContext),
     .init           = libkdu_decode_init,
-    .decode         = libkdu_decode_frame,
+    FF_CODEC_DECODE_CB(libkdu_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1,
     .p.priv_class   = &kakadu_decoder_class,
     .p.wrapper_name = "libkdu",
