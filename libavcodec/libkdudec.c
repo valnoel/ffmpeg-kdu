@@ -84,6 +84,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     kdu_compressed_source *source;
     kdu_codestream *code_stream;
     kdu_stripe_decompressor *decompressor;
+    kdu_stripe_decompressor_options decompressor_opts;
 
     if(!avpkt->data) {
         *got_frame = 0;
@@ -119,6 +120,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
         goto done;
     }
 
+    kdu_stripe_decompressor_options_init(&decompressor_opts);
+
     // Initialize the output picture buffer
     if ((ret = ff_get_buffer(avctx, picture, 0)) < 0) {
         goto done;
@@ -135,7 +138,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     }
 
     // Start decoding the stripes
-    kdu_stripe_decompressor_start(decompressor, code_stream);
+    kdu_stripe_decompressor_start(decompressor, code_stream, &decompressor_opts);
     while (!pull_strip_should_stop) {
         pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, buffer, stripe_heights);
     }
