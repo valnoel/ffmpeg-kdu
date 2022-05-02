@@ -45,7 +45,7 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
     const char* delims = " ";
 
     if (ctx->kdu_params) {
-        kdu_param = av_strtok(ctx->kdu_params, delims, NULL);
+        kdu_param = av_strtok(ctx->kdu_params, delims, &save_ptr);
         for(int i = 0; kdu_param != NULL; i++) {
             ctx->kdu_generic_params[i] = av_strdup(kdu_param);
             kdu_param = av_strtok(NULL, delims, &save_ptr);
