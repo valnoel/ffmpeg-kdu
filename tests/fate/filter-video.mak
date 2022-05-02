@@ -867,6 +867,9 @@ fate-filter-meta-4560-rotate0: CMD = framecrc -auto_conversion_filters -flags +b
 
 REFCMP_DEPS = FFMPEG LAVFI_INDEV TESTSRC2_FILTER AVGBLUR_FILTER METADATA_FILTER
 
+FATE_FILTER-$(call ALLYES, $(REFCMP_DEPS) BLURDETECT_FILTER) += fate-filter-refcmp-blurdetect-yuv
+fate-filter-refcmp-blurdetect-yuv: CMD = cmp_metadata blurdetect yuv420p 0.015
+
 FATE_FILTER-$(call ALLYES, $(REFCMP_DEPS) PSNR_FILTER) += fate-filter-refcmp-psnr-rgb
 fate-filter-refcmp-psnr-rgb: CMD = refcmp_metadata psnr rgb24 0.002
 
@@ -878,6 +881,9 @@ fate-filter-refcmp-ssim-rgb: CMD = refcmp_metadata ssim rgb24 0.015
 
 FATE_FILTER-$(call ALLYES, $(REFCMP_DEPS) SSIM_FILTER) += fate-filter-refcmp-ssim-yuv
 fate-filter-refcmp-ssim-yuv: CMD = refcmp_metadata ssim yuv422p 0.015
+
+FATE_FILTER-$(call ALLYES, $(REFCMP_DEPS) SITI_FILTER) += fate-filter-refcmp-siti-yuv
+fate-filter-refcmp-siti-yuv: CMD = cmp_metadata siti yuv420p 0.015
 
 FATE_SAMPLES_FFPROBE += $(FATE_METADATA_FILTER-yes)
 FATE_SAMPLES_FFMPEG += $(FATE_FILTER_SAMPLES-yes)
