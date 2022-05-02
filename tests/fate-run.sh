@@ -340,6 +340,7 @@ lavf_container_fate()
     t="${test#lavf-fate-}"
     outdir="tests/data/lavf-fate"
     file=${outdir}/lavf.$t
+    cleanfiles="$cleanfiles $file"
     input="${target_samples}/$1"
     do_avconv $file -auto_conversion_filters $DEC_OPTS $2 -i "$input" "$ENC_OPTS -metadata title=lavftest" -vcodec copy -acodec copy
     do_avconv_crc $file -auto_conversion_filters $DEC_OPTS -i $target_path/$file $3
@@ -377,8 +378,28 @@ refcmp_metadata(){
     refcmp=$1
     pixfmt=$2
     fuzz=${3:-0.001}
-    ffmpeg $FLAGS $ENC_OPTS \
+    ffmpeg -auto_conversion_filters $FLAGS $ENC_OPTS \
         -lavfi "testsrc2=size=300x200:rate=1:duration=5,format=${pixfmt},split[ref][tmp];[tmp]avgblur=4[enc];[enc][ref]${refcmp},metadata=print:file=-" \
+        -f null /dev/null | awk -v ref=${ref} -v fuzz=${fuzz} -f ${base}/refcmp-metadata.awk -
+}
+
+cmp_metadata(){
+    refcmp=$1
+    pixfmt=$2
+    fuzz=${3:-0.001}
+    ffmpeg $FLAGS $ENC_OPTS \
+        -lavfi "testsrc2=size=300x200:rate=1:duration=5,format=${pixfmt},${refcmp},metadata=print:file=-" \
+        -f null /dev/null | awk -v ref=${ref} -v fuzz=${fuzz} -f ${base}/refcmp-metadata.awk -
+}
+
+refcmp_metadata_files(){
+    refcmp=$1
+    pixfmt=$2
+    file1=$3
+    file2=$4
+    fuzz=${5:-0.001}
+    ffmpeg -auto_conversion_filters $FLAGS -i $file1 $FLAGS -i $file2 $ENC_OPTS \
+        -lavfi "[0:v]format=${pixfmt}[v0];[1:v]format=${pixfmt}[v1];[v0][v1]${refcmp},metadata=print:file=-" \
         -f null /dev/null | awk -v ref=${ref} -v fuzz=${fuzz} -f ${base}/refcmp-metadata.awk -
 }
 
