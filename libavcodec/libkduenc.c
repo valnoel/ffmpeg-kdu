@@ -19,6 +19,9 @@ typedef struct LibKduContext {
     AVClass *avclass;
     char *kdu_params;
     const char* kdu_generic_params[KAKADU_MAX_GENERIC_PARAMS];
+    int fastest;
+    int precise;
+    kdu_stripe_compressor_options encoder_opts;
 } LibKduContext;
 
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
@@ -52,6 +55,11 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
         }
     }
 
+    kdu_stripe_compressor_options_init(&ctx->encoder_opts);
+
+    ctx->encoder_opts.force_precise = ctx->precise;
+    ctx->encoder_opts.want_fastest = ctx->fastest;
+
     return 0;
 }
 
@@ -64,7 +72,6 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     kdu_siz_params *siz_params;
     mem_compressed_target *target;
     kdu_stripe_compressor *encoder;
-    kdu_stripe_compressor_options encoder_opts;
 
     uint8_t* data;
     uint8_t* buffer;
@@ -119,9 +126,8 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         stripe_heights[i] = avctx->height;
     }
 
-    kdu_stripe_compressor_options_init(&encoder_opts);
 
-    kdu_stripe_compressor_start(encoder, code_stream, &encoder_opts);
+    kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
 
     stop = 0;
     while (!stop) {
@@ -158,6 +164,8 @@ done:
 #define OFFSET(x) offsetof(LibKduContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
+    { "fastest", "Use of 16-bit data processing as often as possible.", OFFSET(fastest), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
+    { "precise", "Forces the use of 32-bit representations", OFFSET(precise), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
     { "kdu_params", "KDU generic arguments", OFFSET(kdu_params), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = VE },
     { NULL },
 };
