@@ -17,11 +17,13 @@
 
 typedef struct LibKduContext {
     AVClass *avclass;
-    char *kdu_params;
     const char* kdu_generic_params[KAKADU_MAX_GENERIC_PARAMS];
+    kdu_stripe_compressor_options encoder_opts;
+    char *kdu_params;
     int fastest;
     int precise;
-    kdu_stripe_compressor_options encoder_opts;
+    float rate;
+    int slope;
 } LibKduContext;
 
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
@@ -59,6 +61,8 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
 
     ctx->encoder_opts.force_precise = ctx->precise;
     ctx->encoder_opts.want_fastest = ctx->fastest;
+    ctx->encoder_opts.rate = ctx->rate;
+    ctx->encoder_opts.slope = ctx->slope;
 
     return 0;
 }
@@ -166,6 +170,8 @@ done:
 static const AVOption options[] = {
     { "fastest", "Use of 16-bit data processing as often as possible.", OFFSET(fastest), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
     { "precise", "Forces the use of 32-bit representations", OFFSET(precise), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
+    { "rate", "Maximum bit-rate ratio", OFFSET(rate), AV_OPT_TYPE_FLOAT, {.dbl = -1}, -1, 1, .flags = VE },
+    { "slope", "Distortion-length slope threshold", OFFSET(slope), AV_OPT_TYPE_INT, {.i64 = -1}, -1, UINT16_MAX, .flags = VE },
     { "kdu_params", "KDU generic arguments", OFFSET(kdu_params), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = VE },
     { NULL },
 };
