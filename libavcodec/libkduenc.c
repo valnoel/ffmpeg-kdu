@@ -27,11 +27,15 @@ typedef struct LibKduContext {
 } LibKduContext;
 
 static void libkdu_error_handler(const char* msg) {
-  av_log(NULL, AV_LOG_ERROR, "Kakadu error: %s", msg);
+  av_log(NULL, AV_LOG_ERROR, "%s", msg);
 }
 
 static void libkdu_warning_handler(const char* msg) {
-  av_log(NULL, AV_LOG_WARNING, "Kakadu warning: %s", msg);
+  av_log(NULL, AV_LOG_WARNING, "%s", msg);
+}
+
+static void libkdu_info_handler(const char* msg) {
+  av_log(NULL, AV_LOG_INFO, "%s", msg);
 }
 
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
@@ -124,6 +128,7 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
 
     kdu_register_error_handler(&libkdu_error_handler);
     kdu_register_warning_handler(&libkdu_warning_handler);
+    kdu_register_info_handler(&libkdu_info_handler);
 
     parse_generic_parameters(ctx);
 
@@ -171,7 +176,9 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     libkdu_copy_from_packed_8(data, frame, pix_fmt_desc->nb_components);
 
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
-    kdu_siz_params_set_precision(siz_params, 0, av_get_bits_per_pixel(pix_fmt_desc));
+
+    /* TODO: this is the number of bits per component, not per pixel */
+    kdu_siz_params_set_precision(siz_params, 0, av_get_bits_per_pixel(pix_fmt_desc)/pix_fmt_desc->nb_components);
     kdu_siz_params_set_size(siz_params, 0, avctx->height, avctx->width);
     kdu_siz_params_set_signed(siz_params, 0, 0);
 
