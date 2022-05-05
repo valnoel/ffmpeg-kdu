@@ -20,10 +20,10 @@ typedef struct LibKduContext {
     const char* kdu_generic_params[KAKADU_MAX_GENERIC_PARAMS];
     kdu_stripe_compressor_options encoder_opts;
     char *kdu_params;
+    char *rate;
+    char *slope;
     int fastest;
     int precise;
-    float rate;
-    int slope;
 } LibKduContext;
 
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
@@ -42,9 +42,8 @@ static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame
     }
 }
 
-static av_cold int libkdu_encode_init(AVCodecContext *avctx)
+static void parse_generic_parameters(LibKduContext *ctx)
 {
-    LibKduContext *ctx = avctx->priv_data;
     char* kdu_param;
     char* save_ptr;
     const char* delims = " ";
@@ -56,13 +55,73 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
             kdu_param = av_strtok(NULL, delims, &save_ptr);
         }
     }
+}
+
+static int parse_rate_parameter(LibKduContext *ctx)
+{
+    char* item;
+    char* save_ptr;
+    const char* delims = ",";
+    float ratio;
+
+    if (ctx->rate) {
+        item = av_strtok(ctx->rate, delims, &save_ptr);
+        for(int i = 0; item != NULL; i++) {
+            if (i == 0 && strcmp(item, "-") == 0) {
+                ctx->encoder_opts.rate[i] = -1.0f;
+                ctx->encoder_opts.rate_count++;
+            } else {
+                ratio = atof(item);
+                if (ratio <= 0.0) {
+                    av_log(ctx, AV_LOG_ERROR, "Rate parameters must be strictly positive real numbers");
+                    return 1;
+                }
+                ctx->encoder_opts.rate[i] = ratio;
+                ctx->encoder_opts.rate_count++;
+            }
+            item = av_strtok(NULL, delims, &save_ptr);
+        }
+    }
+
+    return 0;
+
+static int parse_slope_parameter(LibKduContext *ctx)
+{
+    char* item;
+    char* save_ptr;
+    const char* delims = ",";
+    int slope;
+
+    if (ctx->slope) {
+        item = av_strtok(ctx->slope, delims, &save_ptr);
+        for (int i = 0; item != NULL; i++) {
+            slope = atoi(item);
+            if((slope < 0) || (slope > UINT16_MAX)) {
+                av_log(ctx, AV_LOG_ERROR, "Distortion-length slope values must be in the range 0 to 65535");
+                return 1;
+            }
+            ctx->encoder_opts.slope[i] = slope;
+            ctx->encoder_opts.slope_count++;
+            item = av_strtok(NULL, delims, &save_ptr);
+        }
+    }
+
+    return 0;
+}
+
+static av_cold int libkdu_encode_init(AVCodecContext *avctx)
+{
+    LibKduContext *ctx = avctx->priv_data;
+    parse_generic_parameters(ctx);
 
     kdu_stripe_compressor_options_init(&ctx->encoder_opts);
 
+    if(parse_rate_parameter(ctx) || parse_slope_parameter(ctx)) {
+        return 1;
+    }
+
     ctx->encoder_opts.force_precise = ctx->precise;
     ctx->encoder_opts.want_fastest = ctx->fastest;
-    ctx->encoder_opts.rate = ctx->rate;
-    ctx->encoder_opts.slope = ctx->slope;
 
     return 0;
 }
@@ -168,11 +227,11 @@ done:
 #define OFFSET(x) offsetof(LibKduContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
-    { "fastest", "Use of 16-bit data processing as often as possible.", OFFSET(fastest), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
-    { "precise", "Forces the use of 32-bit representations", OFFSET(precise), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VE },
-    { "rate", "Maximum bit-rate ratio", OFFSET(rate), AV_OPT_TYPE_FLOAT, {.dbl = -1}, -1, 1, .flags = VE },
-    { "slope", "Distortion-length slope threshold", OFFSET(slope), AV_OPT_TYPE_INT, {.i64 = -1}, -1, UINT16_MAX, .flags = VE },
-    { "kdu_params", "KDU generic arguments", OFFSET(kdu_params), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = VE },
+    { "rate",       "Compressor bit-rates: -|<bits/pel>,<bits/pel>,...",   OFFSET(rate),       AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
+    { "slope",      "Distortion-length slope thresholds",                  OFFSET(slope),      AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
+    { "fastest",    "Use of 16-bit data processing as often as possible.", OFFSET(fastest),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
+    { "precise",    "Forces the use of 32-bit representations",            OFFSET(precise),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
+    { "kdu_params", "KDU generic arguments",                               OFFSET(kdu_params), AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
     { NULL },
 };
 
