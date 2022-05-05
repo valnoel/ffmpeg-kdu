@@ -26,6 +26,14 @@ typedef struct LibKduContext {
     int precise;
 } LibKduContext;
 
+static void libkdu_error_handler(const char* msg) {
+  av_log(NULL, AV_LOG_ERROR, "Kakadu error: %s", msg);
+}
+
+static void libkdu_warning_handler(const char* msg) {
+  av_log(NULL, AV_LOG_WARNING, "Kakadu warning: %s", msg);
+}
+
 static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
 {
     uint8_t *img_ptr;
@@ -84,6 +92,7 @@ static int parse_rate_parameter(LibKduContext *ctx)
     }
 
     return 0;
+}
 
 static int parse_slope_parameter(LibKduContext *ctx)
 {
@@ -112,6 +121,10 @@ static int parse_slope_parameter(LibKduContext *ctx)
 static av_cold int libkdu_encode_init(AVCodecContext *avctx)
 {
     LibKduContext *ctx = avctx->priv_data;
+
+    kdu_register_error_handler(&libkdu_error_handler);
+    kdu_register_warning_handler(&libkdu_warning_handler);
+
     parse_generic_parameters(ctx);
 
     kdu_stripe_compressor_options_init(&ctx->encoder_opts);
