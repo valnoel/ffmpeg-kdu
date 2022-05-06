@@ -16,6 +16,10 @@
 
 typedef struct LibKduContext {
     AVClass *class;
+    int fastest;
+    int precise;
+    int reduce;
+    kdu_stripe_decompressor_options decompressor_opts;
 } LibKduContext;
 
 static inline int libkdu_are_pixel_components_packed(enum AVPixelFormat pix_fmt)
@@ -24,14 +28,11 @@ static inline int libkdu_are_pixel_components_packed(enum AVPixelFormat pix_fmt)
     int i, component_plane;
 
     if (pix_fmt == AV_PIX_FMT_GRAY16) {
-        printf("Pixel GRAY16!\n");
         return 0;
     }
 
     component_plane = desc->comp[0].plane;
-    printf("Component 0: component_plane=%d\n", component_plane);
     for (i = 1; i < desc->nb_components; i++) {
-        printf("Component %d: component_plane=%d\n", i, desc->comp[i].plane);
         if (component_plane != desc->comp[i].plane)
             return 0;
     }
@@ -62,19 +63,22 @@ static inline void libkdu_copy_to_packed_8(AVFrame *picture, const uint8_t *data
 
 static av_cold int libkdu_decode_init(AVCodecContext *avctx)
 {
-    // LibKduContext *ctx = avctx->priv_data;
+     LibKduContext *ctx = avctx->priv_data;
 
-    // TODO set decoding parameters
+    kdu_stripe_decompressor_options_init(&ctx->decompressor_opts);
+
+    ctx->decompressor_opts.want_fastest = ctx->fastest;
+    ctx->decompressor_opts.force_precise = ctx->precise;
+    ctx->decompressor_opts.reduce = ctx->reduce;
 
     return 0;
 }
 
-static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
+static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *avpkt)
 {
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
-    // LibKduContext *ctx = avctx->priv_data;
-    AVFrame *picture = data;
+    LibKduContext *ctx = avctx->priv_data;
     uint8_t* buffer;
 
     int width, height, num_comps, nb_pixels, bytes_per_pixel, ret;
@@ -84,7 +88,6 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     kdu_compressed_source *source;
     kdu_codestream *code_stream;
     kdu_stripe_decompressor *decompressor;
-    kdu_stripe_decompressor_options decompressor_opts;
 
     if(!avpkt->data) {
         *got_frame = 0;
@@ -100,6 +103,9 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     if ((ret = kdu_codestream_create_from_source(source, &code_stream))) {
         goto done;
     }
+
+    // Apply input levels restrictions
+    kdu_codestream_discard_levels(code_stream, ctx->decompressor_opts.reduce);
 
     // Retrieve the frame width and height from the source
     kdu_codestream_get_size(code_stream, 0, &height, &width);
@@ -120,10 +126,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
         goto done;
     }
 
-    kdu_stripe_decompressor_options_init(&decompressor_opts);
-
     // Initialize the output picture buffer
-    if ((ret = ff_get_buffer(avctx, picture, 0)) < 0) {
+    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0) {
         goto done;
     }
 
@@ -138,7 +142,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     }
 
     // Start decoding the stripes
-    kdu_stripe_decompressor_start(decompressor, code_stream, &decompressor_opts);
+    kdu_stripe_decompressor_start(decompressor, code_stream, &ctx->decompressor_opts);
     while (!pull_strip_should_stop) {
         pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, buffer, stripe_heights);
     }
@@ -152,7 +156,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
     switch (bytes_per_pixel) {
         case 1:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             } else {
                 av_log(avctx, AV_LOG_ERROR, "Copy to 8 unimplemented!");
                 ret = 0;
@@ -161,7 +165,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
             break;
         case 2:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             } else {
                 av_log(avctx, AV_LOG_ERROR, "Copy to 16 unimplemented!");
                 ret = 0;
@@ -171,7 +175,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
         case 3:
         case 4:
             if (are_components_packed) {
-                libkdu_copy_to_packed_8(picture, buffer, num_comps);
+                libkdu_copy_to_packed_8(frame, buffer, num_comps);
             }
             break;
         case 6:
@@ -195,8 +199,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, void *data, int *got_frame
 
     *got_frame = 1;
 
-    picture->pict_type = AV_PICTURE_TYPE_I;
-    picture->key_frame = 1;
+    frame->pict_type = AV_PICTURE_TYPE_I;
+    frame->key_frame = 1;
 
     ret = buf_size;
 
@@ -214,6 +218,9 @@ done:
 #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
 
 static const AVOption options[] = {
+    { "fastest", "Use of 16-bit data processing as often as possible.", OFFSET(fastest), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VD },
+    { "precise", "Forces the use of 32-bit representations", OFFSET(precise), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, .flags = VD },
+    { "reduce", "Number of highest resolution levels to be discarded", OFFSET(reduce), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT16_MAX, .flags = VD },
     { NULL },
 };
 
@@ -231,7 +238,7 @@ const FFCodec ff_libkdu_decoder = {
     .p.id           = AV_CODEC_ID_JPEG2000,
     .priv_data_size = sizeof(LibKduContext),
     .init           = libkdu_decode_init,
-    .decode         = libkdu_decode_frame,
+    FF_CODEC_DECODE_CB(libkdu_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_DR1,
     .p.priv_class   = &kakadu_decoder_class,
     .p.wrapper_name = "libkdu",
