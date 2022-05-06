@@ -61,6 +61,22 @@ static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame
     }
 }
 
+static inline void libkdu_copy_from_packed_16(uint8_t *data, const AVFrame *frame, int nb_components)
+{
+    uint8_t *img_ptr;
+    int x, y, c;
+    int index = 0;
+
+    for (y = 0; y < frame->height; y++) {
+        img_ptr = frame->data[0] + y * frame->linesize[0];
+        for (x = 0; x < frame->width; x++) {
+            for (c = 0; c < nb_components; c++) {
+                data[index++] = *img_ptr++;
+                data[index++] = *img_ptr++;
+            }
+        }
+    }
+
 static void parse_generic_parameters(LibKduContext *ctx)
 {
     char* kdu_param;
@@ -191,8 +207,19 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
 
     // Initialize input data buffer
     nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
-    data = av_malloc(nb_pixels);
-    libkdu_copy_from_packed_8(data, frame, pix_fmt_desc->nb_components);
+    data = av_malloc(nb_pixels * (component_bit_depth / 8));
+
+    switch(component_bit_depth) {
+        case 8:
+            libkdu_copy_from_packed_8(data, frame, pix_fmt_desc->nb_components);
+            break;
+        case 16:
+            libkdu_copy_from_packed_16(data, frame, pix_fmt_desc->nb_components);
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Unsupported %d pixel component bit depth", component_bit_depth);
+            goto done;
+    }
 
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
     kdu_siz_params_set_precision(siz_params, 0, component_bit_depth);
@@ -290,7 +317,7 @@ const FFCodec ff_libkdu_encoder = {
     FF_CODEC_ENCODE_CB(libkdu_encode_frame),
     .p.capabilities = AV_CODEC_CAP_FRAME_THREADS,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_NONE
+        AV_PIX_FMT_RGB24, AV_PIX_FMT_RGB48, AV_PIX_FMT_NONE
     },
     .p.priv_class   = &kakadu_encoder_class,
     .p.wrapper_name = "libkdu",
