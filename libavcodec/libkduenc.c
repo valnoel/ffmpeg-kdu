@@ -251,7 +251,7 @@ done:
 static const AVOption options[] = {
     { "rate",       "Compressor bit-rates: -|<bits/pel>,<bits/pel>,...",   OFFSET(rate),       AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
     { "slope",      "Distortion-length slope thresholds",                  OFFSET(slope),      AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
-    { "fastest",    "Use of 16-bit data processing as often as possible.", OFFSET(fastest),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
+    { "fastest",    "Use of 16-bit data processing as often as possible.", OFFSET(fastest),    AV_OPT_TYPE_BOOL,   {.i64 = 1},    0,  1, .flags = VE },
     { "precise",    "Forces the use of 32-bit representations",            OFFSET(precise),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
     { "tolerance",  "Percent tolerance on layer sizes given using rate",   OFFSET(tolerance),  AV_OPT_TYPE_FLOAT,  {.i64 = 2},    0,  50, .flags = VE },
     { "kdu_params", "KDU generic arguments",                               OFFSET(kdu_params), AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
