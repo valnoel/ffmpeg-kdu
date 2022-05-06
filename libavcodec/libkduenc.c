@@ -162,6 +162,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     int buf_sz;
     int nb_pixels;
     int* stripe_heights;
+    int component_bit_depth;
 
     int stop;
     int ret;
@@ -171,6 +172,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     }
 
     pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+    component_bit_depth = pix_fmt_desc->comp[0].depth;
 
     // Initialize input data buffer
     nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
@@ -178,9 +180,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     libkdu_copy_from_packed_8(data, frame, pix_fmt_desc->nb_components);
 
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
-
-    /* TODO: this is the number of bits per component, not per pixel */
-    kdu_siz_params_set_precision(siz_params, 0, av_get_bits_per_pixel(pix_fmt_desc)/pix_fmt_desc->nb_components);
+    kdu_siz_params_set_precision(siz_params, 0, component_bit_depth);
     kdu_siz_params_set_size(siz_params, 0, avctx->height, avctx->width);
     kdu_siz_params_set_signed(siz_params, 0, 0);
 
