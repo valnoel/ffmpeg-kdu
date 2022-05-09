@@ -167,12 +167,19 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     int stop;
     int ret;
 
+    pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+    component_bit_depth = pix_fmt_desc->comp[0].depth;
+
+    for (int i = 1; i < pix_fmt_desc->nb_components; ++i) {
+        if (component_bit_depth != pix_fmt_desc->comp[i].depth) {
+            av_log(avctx, AV_LOG_ERROR, "Pixel components must have the same bit-depth");
+            return AVERROR_INVALIDDATA;
+        }
+    }
+
     if ((ret = kdu_siz_params_new(&siz_params))) {
         goto done;
     }
-
-    pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
-    component_bit_depth = pix_fmt_desc->comp[0].depth;
 
     // Initialize input data buffer
     nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
