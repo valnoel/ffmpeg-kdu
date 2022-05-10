@@ -63,16 +63,17 @@ static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame
 
 static inline void libkdu_copy_from_packed_16(uint8_t *data, const AVFrame *frame, int nb_components)
 {
-    uint8_t *img_ptr;
+    const uint16_t* img_ptr;
     int x, y, c;
     int index = 0;
 
     for (y = 0; y < frame->height; y++) {
-        img_ptr = frame->data[0] + y * frame->linesize[0];
+        img_ptr = (const uint16_t*) (frame->data[0] + y * frame->linesize[0]);
         for (x = 0; x < frame->width; x++) {
             for (c = 0; c < nb_components; c++) {
-                data[index++] = *img_ptr++;
-                data[index++] = *img_ptr++;
+                data[index++] = (uint8_t) (*img_ptr >> 8);
+                data[index++] = (uint8_t) (*img_ptr & 0xFF);
+                img_ptr++;
             }
         }
     }
@@ -222,9 +223,11 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     }
 
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
-    kdu_siz_params_set_precision(siz_params, 0, component_bit_depth);
-    kdu_siz_params_set_size(siz_params, 0, avctx->height, avctx->width);
-    kdu_siz_params_set_signed(siz_params, 0, 0);
+    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
+        kdu_siz_params_set_precision(siz_params, i, component_bit_depth);
+        kdu_siz_params_set_size(siz_params, i, avctx->height, avctx->width);
+        kdu_siz_params_set_signed(siz_params, i, 0);
+    }
 
     // Allocate output buffer and code stream
     if((ret = kdu_compressed_target_mem_new(&target))) {
