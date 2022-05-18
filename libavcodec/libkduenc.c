@@ -45,74 +45,7 @@ static void libkdu_debug_handler(const char* msg) {
     av_log(msg_ctx, AV_LOG_DEBUG, "%s", msg);
 }
 
-static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
-{
-    uint8_t *img_ptr;
-    int x, y, c;
-    int index = 0;
-
-    for (y = 0; y < frame->height; y++) {
-        img_ptr = frame->data[0] + y * frame->linesize[0];
-        for (x = 0; x < frame->width; x++) {
-            for (c = 0; c < nb_components; c++) {
-                data[index++] = *img_ptr++;
-            }
-        }
-    }
-}
-
-static inline void libkdu_copy_from_packed_16(int16_t *data, const AVFrame *frame, int nb_components)
-{
-    const int16_t* img_ptr;
-    int x, y, c;
-    int index = 0;
-
-    for (y = 0; y < frame->height; y++) {
-        img_ptr = (const int16_t*) (frame->data[0] + y * frame->linesize[0]);
-        for (x = 0; x < frame->width; x++) {
-            for (c = 0; c < nb_components; c++) {
-                data[index++] = *img_ptr++;
-            }
-        }
-    }
-}
-
-static int libkdu_encode_frame_8(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
-{
-    LibKduContext* ctx = avctx->priv_data;
-
-    int stripe_heights[KDU_MAX_COMPONENT_COUNT];
-    int stripe_precisions[KDU_MAX_COMPONENT_COUNT];
-    int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
-
-    int stop;
-    int ret;
-
-    int component_bit_depth = pix_fmt_desc->comp[0].depth;
-
-    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
-        stripe_heights[i] = avctx->height;
-        stripe_precisions[i] = component_bit_depth;
-        stripe_row_gaps[i] = frame->linesize[0];
-    }
-
-    kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
-
-    stop = 0;
-    while (!stop) {
-        stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
-    }
-
-    if ((ret = kdu_stripe_compressor_finish(encoder))) {
-        goto done;
-    }
-
-    done:
-    av_free(data_8);
-    return ret;
-}
-
-static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
+static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
 {
     LibKduContext* ctx = avctx->priv_data;
 
@@ -122,30 +55,38 @@ static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, c
     int stripe_signed[KDU_MAX_COMPONENT_COUNT];
 
     int stop;
-    int ret;
 
     int component_bit_depth = pix_fmt_desc->comp[0].depth;
+    int component_byte_depth = component_bit_depth / 8;
 
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
         stripe_heights[i] = avctx->height;
         stripe_precisions[i] = component_bit_depth;
-        stripe_row_gaps[i] = frame->linesize[0] / (component_bit_depth / 8);
+        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
         stripe_signed[i] = 0;
     }
 
     kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
 
     stop = 0;
-    while (!stop) {
-        stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, (const bool*) stripe_signed);
+    switch (component_bit_depth) {
+        case 8:
+            while (!stop) {
+                stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
+            }
+            break;
+        case 16:
+            while (!stop) {
+                stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, (const bool*) stripe_signed);
+            }
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Unsupported %s pixel format", av_get_pix_fmt_name(avctx->pix_fmt));
+            return AVERROR_INVALIDDATA;
     }
 
-    if ((ret = kdu_stripe_compressor_finish(encoder))) {
-        goto done;
-    }
 
-done:
-    return ret;
+    return kdu_stripe_compressor_finish(encoder);
 }
 
 static void parse_generic_parameters(LibKduContext *ctx)
@@ -301,22 +242,12 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     }
 
-    switch (avctx->pix_fmt) {
-        case AV_PIX_FMT_RGB24:
-            if ((ret = libkdu_encode_frame_8(avctx, frame, pix_fmt_desc, encoder, code_stream))) {
-                goto done;
-            }
-            break;
-        case AV_PIX_FMT_RGB48:
-            if ((ret = libkdu_encode_frame_16(avctx, frame, pix_fmt_desc, encoder, code_stream))) {
-                goto done;
-            }
-            break;
-        default:
-            av_log(avctx, AV_LOG_ERROR, "Unsupported %s pixel format", av_get_pix_fmt_name(avctx->pix_fmt));
-            goto done;
+    // Encode frame
+    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream))) {
+        goto done;
     }
 
+    // Retrieve encoded data
     kdu_compressed_target_bytes(target, &buffer, &buf_sz);
 
     pkt_data = av_malloc(buf_sz);
