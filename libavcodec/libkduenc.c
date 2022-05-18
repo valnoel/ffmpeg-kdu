@@ -45,20 +45,48 @@ static void libkdu_debug_handler(const char* msg) {
     av_log(msg_ctx, AV_LOG_DEBUG, "%s", msg);
 }
 
-static inline void libkdu_copy_from_packed_8(uint8_t *data, const AVFrame *frame, int nb_components)
+static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
 {
-    uint8_t *img_ptr;
-    int x, y, c;
-    int index = 0;
+    LibKduContext* ctx = avctx->priv_data;
 
-    for (y = 0; y < frame->height; y++) {
-        img_ptr = frame->data[0] + y * frame->linesize[0];
-        for (x = 0; x < frame->width; x++) {
-            for (c = 0; c < nb_components; c++) {
-                data[index++] = *img_ptr++;
-            }
-        }
+    int stripe_heights[KDU_MAX_COMPONENT_COUNT];
+    int stripe_precisions[KDU_MAX_COMPONENT_COUNT];
+    int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
+    int stripe_signed[KDU_MAX_COMPONENT_COUNT];
+
+    int stop;
+
+    int component_bit_depth = pix_fmt_desc->comp[0].depth;
+    int component_byte_depth = component_bit_depth / 8;
+
+    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
+        stripe_heights[i] = avctx->height;
+        stripe_precisions[i] = component_bit_depth;
+        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
+        stripe_signed[i] = 0;
     }
+
+    kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
+
+    stop = 0;
+    switch (component_bit_depth) {
+        case 8:
+            while (!stop) {
+                stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
+            }
+            break;
+        case 16:
+            while (!stop) {
+                stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, (const bool*) stripe_signed);
+            }
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Unsupported %s pixel format", av_get_pix_fmt_name(avctx->pix_fmt));
+            return AVERROR_INVALIDDATA;
+    }
+
+
+    return kdu_stripe_compressor_finish(encoder);
 }
 
 static void parse_generic_parameters(LibKduContext *ctx)
@@ -164,15 +192,10 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     mem_compressed_target *target;
     kdu_stripe_compressor *encoder;
 
-    uint8_t* data;
     uint8_t* buffer;
     uint8_t* pkt_data;
     int buf_sz;
-    int nb_pixels;
-    int* stripe_heights;
     int component_bit_depth;
-
-    int stop;
     int ret;
 
     pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
@@ -189,15 +212,13 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     }
 
-    // Initialize input data buffer
-    nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
-    data = av_malloc(nb_pixels);
-    libkdu_copy_from_packed_8(data, frame, pix_fmt_desc->nb_components);
-
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
-    kdu_siz_params_set_precision(siz_params, 0, component_bit_depth);
-    kdu_siz_params_set_size(siz_params, 0, avctx->height, avctx->width);
-    kdu_siz_params_set_signed(siz_params, 0, 0);
+
+    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
+        kdu_siz_params_set_precision(siz_params, i, component_bit_depth);
+        kdu_siz_params_set_size(siz_params, i, avctx->height, avctx->width);
+        kdu_siz_params_set_signed(siz_params, i, 0);
+    }
 
     // Allocate output buffer and code stream
     if((ret = kdu_compressed_target_mem_new(&target))) {
@@ -210,7 +231,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
 
     for (int i = 0; i < KAKADU_MAX_GENERIC_PARAMS; ++i) {
         if (ctx->kdu_generic_params[i] != NULL) {
-            if((ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i]))) {
+            if ((ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i]))) {
                 goto done;
             }
         }
@@ -221,23 +242,12 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
     }
 
-    stripe_heights = av_malloc(pix_fmt_desc->nb_components * sizeof(int));
-    for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
-        stripe_heights[i] = avctx->height;
-    }
-
-
-    kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
-
-    stop = 0;
-    while (!stop) {
-        stop = kdu_stripe_compressor_push_stripe(encoder, data, stripe_heights);
-    }
-
-    if ((ret = kdu_stripe_compressor_finish(encoder))) {
+    // Encode frame
+    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream))) {
         goto done;
     }
-    
+
+    // Retrieve encoded data
     kdu_compressed_target_bytes(target, &buffer, &buf_sz);
 
     pkt_data = av_malloc(buf_sz);
@@ -252,8 +262,6 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     *got_packet = 1;
 
 done:
-    av_free(stripe_heights);
-    av_free(data);
     kdu_stripe_compressor_delete(encoder);
     kdu_codestream_delete(code_stream);
     kdu_compressed_target_mem_delete(target);
@@ -266,7 +274,7 @@ done:
 static const AVOption options[] = {
     { "rate",       "Compressor bit-rates: -|<bits/pel>,<bits/pel>,...",   OFFSET(rate),       AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
     { "slope",      "Distortion-length slope thresholds",                  OFFSET(slope),      AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
-    { "fastest",    "Use of 16-bit data processing as often as possible.", OFFSET(fastest),    AV_OPT_TYPE_BOOL,   {.i64 = 1},    0,  1, .flags = VE },
+    { "fastest",    "Use of 16-bit data processing as often as possible.", OFFSET(fastest),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
     { "precise",    "Forces the use of 32-bit representations",            OFFSET(precise),    AV_OPT_TYPE_BOOL,   {.i64 = 0},    0,  1, .flags = VE },
     { "tolerance",  "Percent tolerance on layer sizes given using rate",   OFFSET(tolerance),  AV_OPT_TYPE_FLOAT,  {.dbl = 2.0},  0,  50, .flags = VE },
     { "kdu_params", "KDU generic arguments",                               OFFSET(kdu_params), AV_OPT_TYPE_STRING, {.str = NULL}, .flags = VE },
@@ -290,7 +298,7 @@ const FFCodec ff_libkdu_encoder = {
     FF_CODEC_ENCODE_CB(libkdu_encode_frame),
     .p.capabilities = AV_CODEC_CAP_FRAME_THREADS,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_NONE
+        AV_PIX_FMT_RGB24, AV_PIX_FMT_RGB48, AV_PIX_FMT_NONE
     },
     .p.priv_class   = &kakadu_encoder_class,
     .p.wrapper_name = "libkdu",
