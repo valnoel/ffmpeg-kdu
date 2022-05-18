@@ -80,32 +80,27 @@ static inline void libkdu_copy_from_packed_16(int16_t *data, const AVFrame *fram
 static int libkdu_encode_frame_8(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
 {
     LibKduContext* ctx = avctx->priv_data;
-    uint8_t* data_8 = NULL;
 
     int stripe_heights[KDU_MAX_COMPONENT_COUNT];
     int stripe_precisions[KDU_MAX_COMPONENT_COUNT];
+    int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
 
     int stop;
     int ret;
 
     int component_bit_depth = pix_fmt_desc->comp[0].depth;
 
-    // Initialize input data buffer
-    int nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
-
-    data_8 = av_malloc(nb_pixels);
-    libkdu_copy_from_packed_8(data_8, frame, pix_fmt_desc->nb_components);
-
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
         stripe_heights[i] = avctx->height;
         stripe_precisions[i] = component_bit_depth;
+        stripe_row_gaps[i] = frame->linesize[0];
     }
 
     kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
 
     stop = 0;
     while (!stop) {
-        stop = kdu_stripe_compressor_push_stripe(encoder, data_8, stripe_heights, NULL, NULL, NULL, stripe_precisions);
+        stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
     }
 
     if ((ret = kdu_stripe_compressor_finish(encoder))) {
@@ -120,10 +115,10 @@ static int libkdu_encode_frame_8(AVCodecContext *avctx, const AVFrame *frame, co
 static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
 {
     LibKduContext* ctx = avctx->priv_data;
-    int16_t* data_16 = NULL;
 
     int stripe_heights[KDU_MAX_COMPONENT_COUNT];
     int stripe_precisions[KDU_MAX_COMPONENT_COUNT];
+    int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
     int stripe_signed[KDU_MAX_COMPONENT_COUNT];
 
     int stop;
@@ -131,15 +126,10 @@ static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, c
 
     int component_bit_depth = pix_fmt_desc->comp[0].depth;
 
-    // Initialize input data buffer
-    int nb_pixels = frame->width * frame->height * pix_fmt_desc->nb_components;
-
-    data_16 = av_malloc(nb_pixels * (component_bit_depth / 8));
-    libkdu_copy_from_packed_16(data_16, frame, pix_fmt_desc->nb_components);
-
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
         stripe_heights[i] = avctx->height;
         stripe_precisions[i] = component_bit_depth;
+        stripe_row_gaps[i] = frame->linesize[0] / (component_bit_depth / 8);
         stripe_signed[i] = 0;
     }
 
@@ -147,7 +137,7 @@ static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, c
 
     stop = 0;
     while (!stop) {
-        stop = kdu_stripe_compressor_push_stripe_16(encoder, data_16, stripe_heights, NULL, NULL, NULL, stripe_precisions, (const bool*) stripe_signed);
+        stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, (const bool*) stripe_signed);
     }
 
     if ((ret = kdu_stripe_compressor_finish(encoder))) {
@@ -155,7 +145,6 @@ static int libkdu_encode_frame_16(AVCodecContext *avctx, const AVFrame *frame, c
     }
 
 done:
-    av_free(data_16);
     return ret;
 }
 
