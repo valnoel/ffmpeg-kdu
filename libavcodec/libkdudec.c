@@ -82,7 +82,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     uint8_t* buffer;
 
     int width, height, num_comps, nb_pixels, bytes_per_pixel, ret;
-    int *stripe_heights;
+    int stripe_heights[KDU_MAX_COMPONENT_COUNT];
     int pull_strip_should_stop, are_components_packed = 0;
 
     kdu_compressed_source *source;
@@ -136,7 +136,6 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     buffer = av_malloc(nb_pixels);
 
     // Initialize the output picture component stripes
-    stripe_heights = av_malloc(num_comps * sizeof(int));
     for (int i = 0; i < num_comps; ++i) {
         stripe_heights[i] = height;
     }
@@ -144,7 +143,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     // Start decoding the stripes
     kdu_stripe_decompressor_start(decompressor, code_stream, &ctx->decompressor_opts);
     while (!pull_strip_should_stop) {
-        pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, buffer, stripe_heights);
+        pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, buffer, stripe_heights, NULL, NULL, NULL, NULL, NULL);
     }
 
     // Get number of bytes per pixel
@@ -207,7 +206,6 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 done:
     // Clean and return
     av_free(buffer);
-    av_free(stripe_heights);
     kdu_stripe_decompressor_delete(decompressor);
     kdu_codestream_delete(code_stream);
     kdu_compressed_source_buffered_delete(source);
