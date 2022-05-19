@@ -22,7 +22,13 @@ typedef struct LibKduContext {
     kdu_stripe_decompressor_options decompressor_opts;
 } LibKduContext;
 
-static enum AVPixelFormat guess_pixel_format(int nb_components, int component_bit_depth, int is_chroma_sub_sampled) {
+static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
+                                             int nb_components,
+                                             int component_bit_depth,
+                                             const int* component_w_sampling_ratios,
+                                             const int* component_h_sampling_ratios) {
+    int w_sub_sampling, h_sub_sampling;
+
     switch (nb_components) {
         case 1:
             switch (component_bit_depth) {
@@ -37,24 +43,99 @@ static enum AVPixelFormat guess_pixel_format(int nb_components, int component_bi
                 default: return AV_PIX_FMT_NONE;
             }
         case 3:
-            if (is_chroma_sub_sampled) {
-                // TODO YUV
+            if (component_w_sampling_ratios[1] != component_w_sampling_ratios[2] || component_h_sampling_ratios[1] != component_h_sampling_ratios[2]) {
+                av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
+                return AV_PIX_FMT_NONE;
+            }
+
+            w_sub_sampling = component_w_sampling_ratios[1] / component_w_sampling_ratios[0];
+            h_sub_sampling = component_h_sampling_ratios[1] / component_h_sampling_ratios[0];
+
+            if (w_sub_sampling > 1 || h_sub_sampling > 1) {
+                switch (w_sub_sampling) {
+                    case 1:
+                        switch (h_sub_sampling) {
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV440P;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    case 2:
+                        switch (h_sub_sampling) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV422P;
+                                    case 16: return AV_PIX_FMT_YUV422P16;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV420P;
+                                    case 16: return AV_PIX_FMT_YUV420P16;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    case 4:
+                        switch (h_sub_sampling) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV411P;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV410P;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    default: break;
+                }
             } else {
                 switch (component_bit_depth) {
                     case 8: return AV_PIX_FMT_RGB24;
                     case 16: return AV_PIX_FMT_RGB48;
-                    default: return AV_PIX_FMT_NONE;
+                    default: break;
                 }
             }
             break;
         case 4:
-            if (is_chroma_sub_sampled) {
-                // TODO YUVA
+            if (component_w_sampling_ratios[1] != component_w_sampling_ratios[2] || component_h_sampling_ratios[1] != component_h_sampling_ratios[2]) {
+                av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
+                return AV_PIX_FMT_NONE;
+            }
+
+            w_sub_sampling = component_w_sampling_ratios[1] / component_w_sampling_ratios[0];
+            h_sub_sampling = component_h_sampling_ratios[1] / component_h_sampling_ratios[0];
+
+            if (w_sub_sampling > 1 || h_sub_sampling > 1) {
+                switch (w_sub_sampling) {
+                    case 2:
+                        switch (h_sub_sampling) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUVA422P;
+                                    case 16: return AV_PIX_FMT_YUVA422P16;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUVA420P;
+                                    case 16: return AV_PIX_FMT_YUVA420P16;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    default: break;
+                }
             } else {
                 switch (component_bit_depth) {
                     case 8: return AV_PIX_FMT_RGBA;
                     case 16: return AV_PIX_FMT_RGBA64;
-                    default: return AV_PIX_FMT_NONE;
+                    default: break;
                 }
             }
             break;
@@ -92,8 +173,10 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
     int stripe_signed[KDU_MAX_COMPONENT_COUNT];
 
+    int component_w_sampling_ratios[KDU_MAX_COMPONENT_COUNT];
+    int component_h_sampling_ratios[KDU_MAX_COMPONENT_COUNT];
+
     int stop = 0;
-    int is_chroma_sub_sampled = 0;
 
     kdu_compressed_source *source;
     kdu_codestream *code_stream;
@@ -142,16 +225,18 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
         goto done;
     }
 
-    // Check whether chroma is sub-sampled:
-    for (int i = 1; i < nb_components; ++i) {
-        if (stripe_widths[i] < width || stripe_heights[i] < height) {
-            is_chroma_sub_sampled = 1;
-            break;
-        }
+    // Get component sub-sampling ratios:
+    for (int i = 0; i < nb_components; ++i) {
+        component_w_sampling_ratios[i] = width / stripe_widths[i];
+        component_h_sampling_ratios[i] = height / stripe_heights[i];
     }
 
     // guess pixel format
-    avctx->pix_fmt = guess_pixel_format(nb_components, component_bit_depth, is_chroma_sub_sampled);
+    avctx->pix_fmt = guess_pixel_format(avctx, nb_components, component_bit_depth, component_w_sampling_ratios, component_h_sampling_ratios);
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
+        av_log(avctx, AV_LOG_ERROR, "Could not to identify the input pixel format");
+        goto done;
+    }
 
     // Initialize the decompressor
     if (ret = kdu_stripe_decompressor_new(&decompressor)) {
