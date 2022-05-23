@@ -25,10 +25,8 @@ typedef struct LibKduContext {
 static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                                              int nb_components,
                                              int component_bit_depth,
-                                             const int* component_w_sampling_ratios,
-                                             const int* component_h_sampling_ratios) {
-    int w_sub_sampling, h_sub_sampling;
-
+                                             const int* sampling_x,
+                                             const int* sampling_y) {
     switch (nb_components) {
         case 1:
             switch (component_bit_depth) {
@@ -43,18 +41,16 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                 default: return AV_PIX_FMT_NONE;
             }
         case 3:
-            if (component_w_sampling_ratios[1] != component_w_sampling_ratios[2] || component_h_sampling_ratios[1] != component_h_sampling_ratios[2]) {
+            if (sampling_x[1] != sampling_x[2] || sampling_y[1] != sampling_y[2]) {
                 av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
                 return AV_PIX_FMT_NONE;
             }
 
-            w_sub_sampling = component_w_sampling_ratios[1] / component_w_sampling_ratios[0];
-            h_sub_sampling = component_h_sampling_ratios[1] / component_h_sampling_ratios[0];
-
-            if (w_sub_sampling > 1 || h_sub_sampling > 1) {
-                switch (w_sub_sampling) {
+            if (sampling_x[1] > 1 || sampling_y[1] > 1) {
+                // Sub-sampling case
+                switch (sampling_x[1]) {
                     case 1:
-                        switch (h_sub_sampling) {
+                        switch (sampling_y[1]) {
                             case 2:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV440P;
@@ -63,7 +59,7 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             default: break;
                         }
                     case 2:
-                        switch (h_sub_sampling) {
+                        switch (sampling_y[1]) {
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV422P;
@@ -79,7 +75,7 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             default: break;
                         }
                     case 4:
-                        switch (h_sub_sampling) {
+                        switch (sampling_y[1]) {
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV411P;
@@ -103,18 +99,16 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
             }
             break;
         case 4:
-            if (component_w_sampling_ratios[1] != component_w_sampling_ratios[2] || component_h_sampling_ratios[1] != component_h_sampling_ratios[2]) {
+            if (sampling_x[1] != sampling_x[2] || sampling_y[1] != sampling_y[2]) {
                 av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
                 return AV_PIX_FMT_NONE;
             }
 
-            w_sub_sampling = component_w_sampling_ratios[1] / component_w_sampling_ratios[0];
-            h_sub_sampling = component_h_sampling_ratios[1] / component_h_sampling_ratios[0];
-
-            if (w_sub_sampling > 1 || h_sub_sampling > 1) {
-                switch (w_sub_sampling) {
+            if (sampling_x[1] > 1 || sampling_y[1] > 1) {
+                // Sub-sampling case
+                switch (sampling_x[1]) {
                     case 2:
-                        switch (h_sub_sampling) {
+                        switch (sampling_y[1]) {
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUVA422P;
@@ -163,7 +157,6 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     int buf_size = avpkt->size;
     LibKduContext *ctx = avctx->priv_data;
 
-    int width, height;
     int nb_components, component_bit_depth, component_byte_depth;
     int ret;
 
@@ -173,8 +166,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
     int stripe_signed[KDU_MAX_COMPONENT_COUNT];
 
-    int component_w_sampling_ratios[KDU_MAX_COMPONENT_COUNT];
-    int component_h_sampling_ratios[KDU_MAX_COMPONENT_COUNT];
+    int component_sampling_x[KDU_MAX_COMPONENT_COUNT];
+    int component_sampling_y[KDU_MAX_COMPONENT_COUNT];
 
     int stop = 0;
 
@@ -218,21 +211,19 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
     // Set the output frame width and height
-    width = stripe_widths[0];
-    height = stripe_heights[0];
-
-    if ((ret = ff_set_dimensions(avctx, width, height)) < 0) {
+    if ((ret = ff_set_dimensions(avctx, stripe_widths[0], stripe_heights[0])) < 0) {
         goto done;
     }
 
     // Get component sub-sampling ratios:
     for (int i = 0; i < nb_components; ++i) {
-        component_w_sampling_ratios[i] = width / stripe_widths[i];
-        component_h_sampling_ratios[i] = height / stripe_heights[i];
+        kdu_codestream_get_subsampling(code_stream, i, &component_sampling_x[i], &component_sampling_y[i]);
     }
 
     // guess pixel format
-    avctx->pix_fmt = guess_pixel_format(avctx, nb_components, component_bit_depth, component_w_sampling_ratios, component_h_sampling_ratios);
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
+        avctx->pix_fmt = guess_pixel_format(avctx, nb_components, component_bit_depth, component_sampling_x, component_sampling_y);
+    }
     if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
         av_log(avctx, AV_LOG_ERROR, "Could not to identify the input pixel format");
         goto done;
