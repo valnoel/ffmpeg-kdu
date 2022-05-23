@@ -158,6 +158,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     LibKduContext *ctx = avctx->priv_data;
 
     int nb_components, component_bit_depth, component_byte_depth;
+    int planes;
     int ret;
 
     int stripe_widths[KDU_MAX_COMPONENT_COUNT];
@@ -240,9 +241,13 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
 
-    component_byte_depth = component_bit_depth / 8;
-    for (int i = 0; i < nb_components; ++i) {
-        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
+    planes = av_pix_fmt_count_planes(avctx->pix_fmt);
+
+    if (planes > 1) {
+        component_byte_depth = component_bit_depth / 8;
+        for (int i = 0; i < nb_components; ++i) {
+            stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
+        }
     }
 
     // Start decoding the stripes
@@ -250,14 +255,28 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
     switch (component_bit_depth) {
         case 8:
-            while (!stop) {
-                stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, NULL);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_planar(decompressor, frame->data, stripe_heights, NULL, NULL, stripe_precisions, NULL);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions,
+                                                               NULL);
+                }
             }
             break;
         case 16:
-            while (!stop) {
-                stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
-                                                              stripe_precisions, (const bool*) stripe_signed, NULL);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_planar_16(decompressor, (int16_t**) frame->data, stripe_heights, NULL, NULL, stripe_precisions,
+                                                                         (const bool*) stripe_signed, NULL);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
+                                                                  stripe_precisions, (const bool*) stripe_signed, NULL);
+                }
             }
             break;
         default:avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
