@@ -22,43 +22,120 @@ typedef struct LibKduContext {
     kdu_stripe_decompressor_options decompressor_opts;
 } LibKduContext;
 
-static inline int libkdu_are_pixel_components_packed(enum AVPixelFormat pix_fmt)
-{
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
-    int i, component_plane;
-
-    if (pix_fmt == AV_PIX_FMT_GRAY16) {
-        return 0;
-    }
-
-    component_plane = desc->comp[0].plane;
-    for (i = 1; i < desc->nb_components; i++) {
-        if (component_plane != desc->comp[i].plane)
-            return 0;
-    }
-    return 1;
-}
-
-static inline int libkdu_get_bytes_per_pixel(enum AVPixelFormat pix_fmt)
-{
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
-    return desc->comp[0].step;
-}
-
-static inline void libkdu_copy_to_packed_8(AVFrame *picture, const uint8_t *data, int nb_components)
-{
-    uint8_t *img_ptr;
-    int x, y, c;
-    int index = 0;
-
-    for (y = 0; y < picture->height; y++) {
-        img_ptr = picture->data[0] + y * picture->linesize[0];
-        for (x = 0; x < picture->width; x++) {
-            for (c = 0; c < nb_components; c++) {
-                *img_ptr++ = data[index++];
+static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
+                                             int nb_components,
+                                             int component_bit_depth,
+                                             const int* sampling_x,
+                                             const int* sampling_y) {
+    switch (nb_components) {
+        case 1:
+            switch (component_bit_depth) {
+                case 8: return AV_PIX_FMT_GRAY8;
+                case 16: return AV_PIX_FMT_GRAY16;
+                default: return AV_PIX_FMT_NONE;
             }
-        }
+        case 2:
+            switch (component_bit_depth) {
+                case 8: return AV_PIX_FMT_YA8;
+                case 16: return AV_PIX_FMT_YA16;
+                default: return AV_PIX_FMT_NONE;
+            }
+        case 3:
+            if (sampling_x[1] != sampling_x[2] || sampling_y[1] != sampling_y[2]) {
+                av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
+                return AV_PIX_FMT_NONE;
+            }
+
+            if (sampling_x[1] > 1 || sampling_y[1] > 1) {
+                // Sub-sampling case
+                switch (sampling_x[1]) {
+                    case 1:
+                        switch (sampling_y[1]) {
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV440P;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    case 2:
+                        switch (sampling_y[1]) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV422P;
+                                    case 16: return AV_PIX_FMT_YUV422P16;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV420P;
+                                    case 16: return AV_PIX_FMT_YUV420P16;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    case 4:
+                        switch (sampling_y[1]) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV411P;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUV410P;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    default: break;
+                }
+            } else {
+                switch (component_bit_depth) {
+                    case 8: return AV_PIX_FMT_RGB24;
+                    case 16: return AV_PIX_FMT_RGB48;
+                    default: break;
+                }
+            }
+            break;
+        case 4:
+            if (sampling_x[1] != sampling_x[2] || sampling_y[1] != sampling_y[2]) {
+                av_log(avctx, AV_LOG_ERROR, "Chroma components must have the same sampling ratio");
+                return AV_PIX_FMT_NONE;
+            }
+
+            if (sampling_x[1] > 1 || sampling_y[1] > 1) {
+                // Sub-sampling case
+                switch (sampling_x[1]) {
+                    case 2:
+                        switch (sampling_y[1]) {
+                            case 1:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUVA422P;
+                                    case 16: return AV_PIX_FMT_YUVA422P16;
+                                    default: break;
+                                }
+                            case 2:
+                                switch (component_bit_depth) {
+                                    case 8: return AV_PIX_FMT_YUVA420P;
+                                    case 16: return AV_PIX_FMT_YUVA420P16;
+                                    default: break;
+                                }
+                            default: break;
+                        }
+                    default: break;
+                }
+            } else {
+                switch (component_bit_depth) {
+                    case 8: return AV_PIX_FMT_RGBA;
+                    case 16: return AV_PIX_FMT_RGBA64;
+                    default: break;
+                }
+            }
+            break;
+        default: break;
     }
+    return AV_PIX_FMT_NONE;
 }
 
 static av_cold int libkdu_decode_init(AVCodecContext *avctx)
@@ -79,11 +156,20 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     LibKduContext *ctx = avctx->priv_data;
-    uint8_t* buffer;
 
-    int width, height, num_comps, nb_pixels, bytes_per_pixel, ret;
+    int nb_components, component_bit_depth, component_byte_depth;
+    int ret;
+
+    int stripe_widths[KDU_MAX_COMPONENT_COUNT];
     int stripe_heights[KDU_MAX_COMPONENT_COUNT];
-    int pull_strip_should_stop, are_components_packed = 0;
+    int stripe_precisions[KDU_MAX_COMPONENT_COUNT];
+    int stripe_row_gaps[KDU_MAX_COMPONENT_COUNT];
+    int stripe_signed[KDU_MAX_COMPONENT_COUNT];
+
+    int component_sampling_x[KDU_MAX_COMPONENT_COUNT];
+    int component_sampling_y[KDU_MAX_COMPONENT_COUNT];
+
+    int stop = 0;
 
     kdu_compressed_source *source;
     kdu_codestream *code_stream;
@@ -107,19 +193,41 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     // Apply input levels restrictions
     kdu_codestream_discard_levels(code_stream, ctx->decompressor_opts.reduce);
 
-    // Retrieve the frame width and height from the source
-    kdu_codestream_get_size(code_stream, 0, &height, &width);
+    // Retrieve the source pixel components attributes
+    nb_components = kdu_codestream_get_num_components(code_stream);
+    component_bit_depth = kdu_codestream_get_depth(code_stream, 0);
 
-    // Retrieve the number of components of the frame from the source
-    num_comps = kdu_codestream_get_num_components(code_stream);
+
+    for (int i = 0; i < nb_components; ++i) {
+        kdu_codestream_get_size(code_stream, i, &stripe_heights[i], &stripe_widths[i]);
+        stripe_precisions[i] = kdu_codestream_get_depth(code_stream, i);
+        stripe_signed[i] = kdu_codestream_get_signed(code_stream, i);
+
+        if (component_bit_depth != stripe_precisions[i]) {
+            av_log(avctx, AV_LOG_ERROR, "Pixel components must have the same bit-depth");
+            ret = AVERROR_INVALIDDATA;
+            goto done;
+        }
+    }
 
     // Set the output frame width and height
-    if ((ret = ff_set_dimensions(avctx, width, height)) < 0) {
+    if ((ret = ff_set_dimensions(avctx, stripe_widths[0], stripe_heights[0])) < 0) {
         goto done;
     }
 
-    // FIXME hard-coded pixfmt
-    avctx->pix_fmt = AV_PIX_FMT_RGB24;
+    // Get component sub-sampling ratios:
+    for (int i = 0; i < nb_components; ++i) {
+        kdu_codestream_get_subsampling(code_stream, i, &component_sampling_x[i], &component_sampling_y[i]);
+    }
+
+    // guess pixel format
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
+        avctx->pix_fmt = guess_pixel_format(avctx, nb_components, component_bit_depth, component_sampling_x, component_sampling_y);
+    }
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
+        av_log(avctx, AV_LOG_ERROR, "Could not to identify the input pixel format");
+        goto done;
+    }
 
     // Initialize the decompressor
     if (ret = kdu_stripe_decompressor_new(&decompressor)) {
@@ -131,62 +239,28 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
         goto done;
     }
 
-    // Initialize output picture buffer
-    nb_pixels = width * height * num_comps;
-    buffer = av_malloc(nb_pixels);
 
-    // Initialize the output picture component stripes
-    for (int i = 0; i < num_comps; ++i) {
-        stripe_heights[i] = height;
+    component_byte_depth = component_bit_depth / 8;
+    for (int i = 0; i < nb_components; ++i) {
+        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
     }
 
     // Start decoding the stripes
     kdu_stripe_decompressor_start(decompressor, code_stream, &ctx->decompressor_opts);
-    while (!pull_strip_should_stop) {
-        pull_strip_should_stop = kdu_stripe_decompressor_pull_stripe(decompressor, buffer, stripe_heights, NULL, NULL, NULL, NULL, NULL);
-    }
 
-    // Get number of bytes per pixel
-    bytes_per_pixel = libkdu_get_bytes_per_pixel(avctx->pix_fmt);
-
-    // Are components interlaced (packed) or planar?
-    are_components_packed   = libkdu_are_pixel_components_packed(avctx->pix_fmt);
-
-    switch (bytes_per_pixel) {
-        case 1:
-            if (are_components_packed) {
-                libkdu_copy_to_packed_8(frame, buffer, num_comps);
-            } else {
-                av_log(avctx, AV_LOG_ERROR, "Copy to 8 unimplemented!");
-                ret = 0;
-                goto done;
-            }
-            break;
-        case 2:
-            if (are_components_packed) {
-                libkdu_copy_to_packed_8(frame, buffer, num_comps);
-            } else {
-                av_log(avctx, AV_LOG_ERROR, "Copy to 16 unimplemented!");
-                ret = 0;
-                goto done;
-            }
-            break;
-        case 3:
-        case 4:
-            if (are_components_packed) {
-                libkdu_copy_to_packed_8(frame, buffer, num_comps);
-            }
-            break;
-        case 6:
+    switch (component_bit_depth) {
         case 8:
-            if (are_components_packed) {
-                av_log(avctx, AV_LOG_ERROR, "Copy to packed 16 unimplemented!");
-                ret = 0;
-                goto done;
+            while (!stop) {
+                stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, NULL);
             }
             break;
-        default:
-            avpriv_report_missing_feature(avctx, "Pixel size %d", bytes_per_pixel);
+        case 16:
+            while (!stop) {
+                stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
+                                                              stripe_precisions, (const bool*) stripe_signed, NULL);
+            }
+            break;
+        default:avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
             ret = AVERROR_PATCHWELCOME;
             goto done;
     }
@@ -205,7 +279,6 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
 done:
     // Clean and return
-    av_free(buffer);
     kdu_stripe_decompressor_delete(decompressor);
     kdu_codestream_delete(code_stream);
     kdu_compressed_source_buffered_delete(source);
