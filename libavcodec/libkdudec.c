@@ -63,12 +63,20 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV422P;
+                                    case 9: return AV_PIX_FMT_YUV422P9;
+                                    case 10: return AV_PIX_FMT_YUV422P10;
+                                    case 12: return AV_PIX_FMT_YUV422P12;
+                                    case 14: return AV_PIX_FMT_YUV422P14;
                                     case 16: return AV_PIX_FMT_YUV422P16;
                                     default: break;
                                 }
                             case 2:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV420P;
+                                    case 9: return AV_PIX_FMT_YUV420P9;
+                                    case 10: return AV_PIX_FMT_YUV420P10;
+                                    case 12: return AV_PIX_FMT_YUV420P12;
+                                    case 14: return AV_PIX_FMT_YUV420P14;
                                     case 16: return AV_PIX_FMT_YUV420P16;
                                     default: break;
                                 }
@@ -112,12 +120,14 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUVA422P;
+                                    case 10: return AV_PIX_FMT_YUVA422P10;
                                     case 16: return AV_PIX_FMT_YUVA422P16;
                                     default: break;
                                 }
                             case 2:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUVA420P;
+                                    case 10: return AV_PIX_FMT_YUVA420P10;
                                     case 16: return AV_PIX_FMT_YUVA420P16;
                                     default: break;
                                 }
@@ -266,6 +276,10 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
                 }
             }
             break;
+        case 9:
+        case 10:
+        case 12:
+        case 14:
         case 16:
             if (planes > 1) {
                 while (!stop) {
