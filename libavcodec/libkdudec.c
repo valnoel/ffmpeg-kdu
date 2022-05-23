@@ -104,6 +104,10 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
             } else {
                 switch (component_bit_depth) {
                     case 8: return AV_PIX_FMT_RGB24;
+                    case 9: return AV_PIX_FMT_GBRP9;
+                    case 10: return AV_PIX_FMT_GBRP10;
+                    case 12: return AV_PIX_FMT_GBRP12;
+                    case 14: return AV_PIX_FMT_GBRP14;
                     case 16: return AV_PIX_FMT_RGB48;
                     default: break;
                 }
