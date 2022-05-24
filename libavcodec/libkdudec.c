@@ -260,7 +260,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
     planes = av_pix_fmt_count_planes(avctx->pix_fmt);
 
-    if (planes > 1) {
+    if (planes == 1) {
         component_byte_depth = component_bit_depth / 8;
         for (int i = 0; i < nb_components; ++i) {
             stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
