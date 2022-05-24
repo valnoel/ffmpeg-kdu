@@ -45,7 +45,19 @@ static void libkdu_debug_handler(const char* msg) {
     av_log(msg_ctx, AV_LOG_DEBUG, "%s", msg);
 }
 
-static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream)
+static void libkdu_get_component_dimensions(AVCodecContext *avctx, const int component_index, int* height, int* width) {
+    const AVPixFmtDescriptor* pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+
+    if (height) {
+        *height = (component_index == 0)? avctx->height : avctx->height / (int) pow(2, pix_fmt_desc->log2_chroma_h);
+    }
+
+    if (width) {
+        *width = (component_index == 0)? avctx->width : avctx->width / (int) pow(2, pix_fmt_desc->log2_chroma_w);
+    }
+}
+
+static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream, const int planes)
 {
     LibKduContext* ctx = avctx->priv_data;
 
@@ -60,10 +72,12 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
     int component_byte_depth = component_bit_depth / 8;
 
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
-        stripe_heights[i] = avctx->height;
-        stripe_precisions[i] = component_bit_depth;
-        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
+        libkdu_get_component_dimensions(avctx, i, &stripe_heights[i], NULL);
+
+        stripe_precisions[i] = pix_fmt_desc->comp[i].depth;
+        stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] / component_byte_depth;
         stripe_signed[i] = 0;
+
     }
 
     kdu_stripe_compressor_start(encoder, code_stream, &ctx->encoder_opts);
@@ -71,13 +85,31 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
     stop = 0;
     switch (component_bit_depth) {
         case 8:
-            while (!stop) {
-                stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_compressor_push_stripe_planar(encoder, (uint8_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
+                }
             }
             break;
+        case 9:
+        case 10:
+        case 12:
+        case 14:
         case 16:
-            while (!stop) {
-                stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, (const bool*) stripe_signed);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_compressor_push_stripe_planar_16(encoder, (int16_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions,
+                                                                       (const bool*) stripe_signed);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
+                                                                stripe_precisions, (const bool*) stripe_signed);
+                }
             }
             break;
         default:
@@ -195,8 +227,10 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     uint8_t* buffer;
     uint8_t* pkt_data;
     int buf_sz;
-    int component_bit_depth;
+    int component_bit_depth, component_height, component_width;
     int ret;
+
+    int planes = av_pix_fmt_count_planes(avctx->pix_fmt);
 
     pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
     component_bit_depth = pix_fmt_desc->comp[0].depth;
@@ -215,8 +249,10 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
 
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
+        libkdu_get_component_dimensions(avctx, i, &component_height, &component_width);
+
         kdu_siz_params_set_precision(siz_params, i, component_bit_depth);
-        kdu_siz_params_set_size(siz_params, i, avctx->height, avctx->width);
+        kdu_siz_params_set_size(siz_params, i, component_height, component_width);
         kdu_siz_params_set_signed(siz_params, i, 0);
     }
 
@@ -243,7 +279,7 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     }
 
     // Encode frame
-    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream))) {
+    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream, planes))) {
         goto done;
     }
 
@@ -298,7 +334,22 @@ const FFCodec ff_libkdu_encoder = {
     FF_CODEC_ENCODE_CB(libkdu_encode_frame),
     .p.capabilities = AV_CODEC_CAP_FRAME_THREADS,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_RGB48, AV_PIX_FMT_NONE
+        AV_PIX_FMT_RGB24, AV_PIX_FMT_RGBA, AV_PIX_FMT_RGB48, AV_PIX_FMT_RGBA64,
+        AV_PIX_FMT_GBR24P, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10, AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
+        AV_PIX_FMT_GRAY8, AV_PIX_FMT_YA8, AV_PIX_FMT_GRAY16, AV_PIX_FMT_YA16,
+        AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY14,
+        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUVA420P,
+        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUVA422P,
+        AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUVA444P,
+        AV_PIX_FMT_YUV420P9, AV_PIX_FMT_YUV422P9, AV_PIX_FMT_YUV444P9,
+        AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA444P9,
+        AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
+        AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA444P10,
+        AV_PIX_FMT_YUV420P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV444P12,
+        AV_PIX_FMT_YUV420P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV444P14,
+        AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
+        AV_PIX_FMT_YUVA420P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA444P16,
+        AV_PIX_FMT_XYZ12, AV_PIX_FMT_NONE
     },
     .p.priv_class   = &kakadu_encoder_class,
     .p.wrapper_name = "libkdu",
