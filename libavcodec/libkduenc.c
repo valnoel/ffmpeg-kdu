@@ -69,7 +69,7 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
     int stop;
 
     int component_bit_depth = pix_fmt_desc->comp[0].depth;
-    int component_byte_depth = component_bit_depth / 8;
+    int component_byte_depth = ceil((double) component_bit_depth / 8);
 
     for (int i = 0; i < pix_fmt_desc->nb_components; ++i) {
         libkdu_get_component_dimensions(avctx, i, &stripe_heights[i], NULL);
