@@ -173,6 +173,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     LibKduContext *ctx = avctx->priv_data;
+    const AVPixFmtDescriptor *pix_fmt_desc;
 
     int nb_components, component_bit_depth, component_byte_depth;
     int planes;
@@ -259,12 +260,11 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
 
     planes = av_pix_fmt_count_planes(avctx->pix_fmt);
+    pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
-    if (planes == 1) {
-        component_byte_depth = component_bit_depth / 8;
-        for (int i = 0; i < nb_components; ++i) {
-            stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
-        }
+    component_byte_depth = ceil((double) component_bit_depth / 8);
+    for (int i = 0; i < nb_components; ++i) {
+        stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] / component_byte_depth;
     }
 
     // Start decoding the stripes
@@ -274,7 +274,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
         case 8:
             if (planes > 1) {
                 while (!stop) {
-                    stop = kdu_stripe_decompressor_pull_stripe_planar(decompressor, frame->data, stripe_heights, NULL, NULL, stripe_precisions, NULL);
+                    stop = kdu_stripe_decompressor_pull_stripe_planar(decompressor, frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions, NULL);
                 }
             } else {
                 while (!stop) {
@@ -290,7 +290,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
         case 16:
             if (planes > 1) {
                 while (!stop) {
-                    stop = kdu_stripe_decompressor_pull_stripe_planar_16(decompressor, (int16_t**) frame->data, stripe_heights, NULL, NULL, stripe_precisions,
+                    stop = kdu_stripe_decompressor_pull_stripe_planar_16(decompressor, (int16_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions,
                                                                          (const bool*) stripe_signed, NULL);
                 }
             } else {
