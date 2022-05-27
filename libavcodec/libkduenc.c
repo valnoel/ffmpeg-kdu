@@ -49,11 +49,11 @@ static void libkdu_get_component_dimensions(AVCodecContext *avctx, const int com
     const AVPixFmtDescriptor* pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
     if (height) {
-        *height = (component_index == 0)? avctx->height : avctx->height / (int) pow(2, pix_fmt_desc->log2_chroma_h);
+        *height = (component_index == 0)? avctx->height : avctx->height / (1 << pix_fmt_desc->log2_chroma_h);
     }
 
     if (width) {
-        *width = (component_index == 0)? avctx->width : avctx->width / (int) pow(2, pix_fmt_desc->log2_chroma_w);
+        *width = (component_index == 0)? avctx->width : avctx->width / (1 << pix_fmt_desc->log2_chroma_w);
     }
 }
 
