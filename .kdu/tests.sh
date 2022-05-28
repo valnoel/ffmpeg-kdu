@@ -41,13 +41,13 @@ yuv_test () {
   echo "--- ${test_name} ---"
 
   source_path=${TEST_IMG_DIR}/${source_name}
-  in_path=${BUILD_DIR}/in.${source_name}
+  in_path=${source_path}
   j2c_lossless_path=${BUILD_DIR}/rev.${source_name}.j2c
   j2c_lossy_path=${BUILD_DIR}/irrev.${source_name}.j2c
   lossless_path=${BUILD_DIR}/rev.${source_name}
   lossy_path=${BUILD_DIR}/irrev.${source_name}
 
-  yuv_params="-s $2 -pix_fmt $3"
+  yuv_params="-s ${rez} -pix_fmt ${fmt}"
 
   ${FFMPEG_CMD} ${yuv_params} -i ${in_path} -c:v libkdu -kdu_params "Creversible=yes" ${j2c_lossless_path}
   ${FFMPEG_CMD} -c:v libkdu -i ${j2c_lossless_path} ${yuv_params} ${lossless_path}
@@ -55,7 +55,7 @@ yuv_test () {
 
   ${FFMPEG_CMD} ${yuv_params} -i ${in_path} -c:v libkdu -rate 1 ${j2c_lossy_path}
   ${FFMPEG_CMD} -c:v libkdu -i ${j2c_lossy_path} ${yuv_params} ${lossy_path}
-  ./ffmpeg -hide_banner ${yuv_params} -i ${lossy_path} -i ${lossless_path}  -lavfi psnr -f null - 2>&1 | grep Parsed_psnr_0
+  ./ffmpeg -hide_banner ${yuv_params} -i ${lossy_path} ${yuv_params} -i ${lossless_path}  -lavfi psnr -f null - 2>&1 | grep Parsed_psnr_0
 }
 
 mkdir -p ${BUILD_DIR}
