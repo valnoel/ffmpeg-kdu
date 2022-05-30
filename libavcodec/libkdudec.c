@@ -264,7 +264,18 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
     component_byte_depth = ceil((double) component_bit_depth / 8);
     for (int i = 0; i < nb_components; ++i) {
-        stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] / component_byte_depth;
+        switch (component_byte_depth) {
+            case 1:
+                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
+                break;
+            case 2:
+                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
+                break;
+            default:
+                avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
+                ret = AVERROR_PATCHWELCOME;
+                goto done;
+        }
     }
 
     // Start decoding the stripes
