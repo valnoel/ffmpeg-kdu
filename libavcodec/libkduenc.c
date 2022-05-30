@@ -75,7 +75,17 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
         libkdu_get_component_dimensions(avctx, i, &stripe_heights[i], NULL);
 
         stripe_precisions[i] = pix_fmt_desc->comp[i].depth;
-        stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] / component_byte_depth;
+        switch (component_byte_depth) {
+            case 1:
+                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
+                break;
+            case 2:
+                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
+                break;
+            default:
+                avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
+                return AVERROR_PATCHWELCOME;
+        }
         stripe_signed[i] = 0;
 
     }
