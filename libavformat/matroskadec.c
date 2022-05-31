@@ -55,6 +55,7 @@
 
 #include "avformat.h"
 #include "avio_internal.h"
+#include "demux.h"
 #include "dovi_isom.h"
 #include "internal.h"
 #include "isom.h"
@@ -3699,6 +3700,8 @@ static int matroska_parse_block(MatroskaDemuxContext *matroska, AVBufferRef *buf
     int n, flags, laces = 0;
     uint64_t num;
     int trust_default_duration;
+
+    av_assert1(buf);
 
     ffio_init_context(&pb, data, size, 0, NULL, NULL, NULL, NULL);
 
