@@ -175,7 +175,7 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     LibKduContext *ctx = avctx->priv_data;
     const AVPixFmtDescriptor *pix_fmt_desc;
 
-    int nb_components, component_bit_depth, component_byte_depth;
+    int nb_components, component_bit_depth;
     int planes;
     int ret;
 
@@ -262,19 +262,15 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     planes = av_pix_fmt_count_planes(avctx->pix_fmt);
     pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
-    component_byte_depth = ceil((double) component_bit_depth / 8);
     for (int i = 0; i < nb_components; ++i) {
-        switch (component_byte_depth) {
-            case 1:
-                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
-                break;
-            case 2:
-                stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
-                break;
-            default:
-                avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
-                ret = AVERROR_PATCHWELCOME;
-                goto done;
+        if (component_bit_depth <= 8) {
+            stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
+        } else if (component_bit_depth <= 16) {
+            stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
+        } else {
+            avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
+            ret = AVERROR_PATCHWELCOME;
+            goto done;
         }
     }
 
