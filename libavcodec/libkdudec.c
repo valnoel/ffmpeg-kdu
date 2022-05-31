@@ -31,6 +31,9 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
         case 1:
             switch (component_bit_depth) {
                 case 8: return AV_PIX_FMT_GRAY8;
+                case 10: return AV_PIX_FMT_GRAY10;
+                case 12: return AV_PIX_FMT_GRAY12;
+                case 14: return AV_PIX_FMT_GRAY14;
                 case 16: return AV_PIX_FMT_GRAY16;
                 default: return AV_PIX_FMT_NONE;
             }
@@ -63,12 +66,20 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV422P;
+                                    case 9: return AV_PIX_FMT_YUV422P9;
+                                    case 10: return AV_PIX_FMT_YUV422P10;
+                                    case 12: return AV_PIX_FMT_YUV422P12;
+                                    case 14: return AV_PIX_FMT_YUV422P14;
                                     case 16: return AV_PIX_FMT_YUV422P16;
                                     default: break;
                                 }
                             case 2:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUV420P;
+                                    case 9: return AV_PIX_FMT_YUV420P9;
+                                    case 10: return AV_PIX_FMT_YUV420P10;
+                                    case 12: return AV_PIX_FMT_YUV420P12;
+                                    case 14: return AV_PIX_FMT_YUV420P14;
                                     case 16: return AV_PIX_FMT_YUV420P16;
                                     default: break;
                                 }
@@ -93,6 +104,10 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
             } else {
                 switch (component_bit_depth) {
                     case 8: return AV_PIX_FMT_RGB24;
+                    case 9: return AV_PIX_FMT_GBRP9;
+                    case 10: return AV_PIX_FMT_GBRP10;
+                    case 12: return AV_PIX_FMT_GBRP12;
+                    case 14: return AV_PIX_FMT_GBRP14;
                     case 16: return AV_PIX_FMT_RGB48;
                     default: break;
                 }
@@ -112,12 +127,14 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
                             case 1:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUVA422P;
+                                    case 10: return AV_PIX_FMT_YUVA422P10;
                                     case 16: return AV_PIX_FMT_YUVA422P16;
                                     default: break;
                                 }
                             case 2:
                                 switch (component_bit_depth) {
                                     case 8: return AV_PIX_FMT_YUVA420P;
+                                    case 10: return AV_PIX_FMT_YUVA420P10;
                                     case 16: return AV_PIX_FMT_YUVA420P16;
                                     default: break;
                                 }
@@ -156,8 +173,10 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     LibKduContext *ctx = avctx->priv_data;
+    const AVPixFmtDescriptor *pix_fmt_desc;
 
-    int nb_components, component_bit_depth, component_byte_depth;
+    int nb_components, component_bit_depth;
+    int planes;
     int ret;
 
     int stripe_widths[KDU_MAX_COMPONENT_COUNT];
@@ -240,9 +259,19 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
 
-    component_byte_depth = component_bit_depth / 8;
+    planes = av_pix_fmt_count_planes(avctx->pix_fmt);
+    pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+
     for (int i = 0; i < nb_components; ++i) {
-        stripe_row_gaps[i] = frame->linesize[0] / component_byte_depth;
+        if (component_bit_depth <= 8) {
+            stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
+        } else if (component_bit_depth <= 16) {
+            stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
+        } else {
+            avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
+            ret = AVERROR_PATCHWELCOME;
+            goto done;
+        }
     }
 
     // Start decoding the stripes
@@ -250,14 +279,32 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
 
     switch (component_bit_depth) {
         case 8:
-            while (!stop) {
-                stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions, NULL);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_planar(decompressor, frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions, NULL);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions,
+                                                               NULL);
+                }
             }
             break;
+        case 9:
+        case 10:
+        case 12:
+        case 14:
         case 16:
-            while (!stop) {
-                stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
-                                                              stripe_precisions, (const bool*) stripe_signed, NULL);
+            if (planes > 1) {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_planar_16(decompressor, (int16_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions,
+                                                                         (const bool*) stripe_signed, NULL);
+                }
+            } else {
+                while (!stop) {
+                    stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
+                                                                  stripe_precisions, (const bool*) stripe_signed, NULL);
+                }
             }
             break;
         default:avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
