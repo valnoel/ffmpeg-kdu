@@ -48,13 +48,11 @@ static void libkdu_debug_handler(const char* msg) {
 static void libkdu_get_component_dimensions(AVCodecContext *avctx, const int component_index, int* height, int* width) {
     const AVPixFmtDescriptor* pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
-    if (height) {
+    if (height)
         *height = (component_index == 0)? avctx->height : avctx->height / (1 << pix_fmt_desc->log2_chroma_h);
-    }
 
-    if (width) {
+    if (width)
         *width = (component_index == 0)? avctx->width : avctx->width / (1 << pix_fmt_desc->log2_chroma_w);
-    }
 }
 
 static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, const AVPixFmtDescriptor *pix_fmt_desc, kdu_stripe_compressor *encoder, kdu_codestream *code_stream, const int planes)
@@ -74,11 +72,11 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
         libkdu_get_component_dimensions(avctx, i, &stripe_heights[i], NULL);
 
         stripe_precisions[i] = pix_fmt_desc->comp[i].depth;
-        if (component_bit_depth <= 8) {
+        if (component_bit_depth <= 8)
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
-        } else if (component_bit_depth <= 16) {
+        else if (component_bit_depth <= 16)
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
-        } else {
+        else {
             avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
             return AVERROR_PATCHWELCOME;
         }
@@ -92,13 +90,11 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
     switch (component_bit_depth) {
         case 8:
             if (planes > 1) {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_compressor_push_stripe_planar(encoder, (uint8_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions);
-                }
             } else {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_compressor_push_stripe(encoder, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions);
-                }
             }
             break;
         case 9:
@@ -107,15 +103,13 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
         case 14:
         case 16:
             if (planes > 1) {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_compressor_push_stripe_planar_16(encoder, (int16_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions,
                                                                        (const bool*) stripe_signed);
-                }
             } else {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_compressor_push_stripe_16(encoder, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
                                                                 stripe_precisions, (const bool*) stripe_signed);
-                }
             }
             break;
         default:
@@ -209,9 +203,8 @@ static av_cold int libkdu_encode_init(AVCodecContext *avctx)
 
     kdu_stripe_compressor_options_init(&ctx->encoder_opts);
 
-    if(parse_rate_parameter(ctx) || parse_slope_parameter(ctx)) {
+    if(parse_rate_parameter(ctx) || parse_slope_parameter(ctx))
         return 1;
-    }
 
     ctx->encoder_opts.force_precise = ctx->precise;
     ctx->encoder_opts.want_fastest = ctx->fastest;
@@ -248,9 +241,8 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         }
     }
 
-    if ((ret = kdu_siz_params_new(&siz_params))) {
+    if ((ret = kdu_siz_params_new(&siz_params)))
         goto done;
-    }
 
     kdu_siz_params_set_num_components(siz_params, pix_fmt_desc->nb_components);
 
@@ -263,31 +255,24 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
     }
 
     // Allocate output buffer and code stream
-    if((ret = kdu_compressed_target_mem_new(&target))) {
+    if((ret = kdu_compressed_target_mem_new(&target)))
         goto done;
-    }
 
-    if ((ret = kdu_codestream_create_from_target(target, siz_params, &code_stream))) {
+    if ((ret = kdu_codestream_create_from_target(target, siz_params, &code_stream)))
         goto done;
-    };
 
     for (int i = 0; i < KAKADU_MAX_GENERIC_PARAMS; ++i) {
-        if (ctx->kdu_generic_params[i] != NULL) {
-            if ((ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i]))) {
-                goto done;
-            }
-        }
+        if (ctx->kdu_generic_params[i] != NULL && (ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i])))
+            goto done;
     }
 
     // Create encoder
-    if ((ret = kdu_stripe_compressor_new(&encoder))) {
+    if ((ret = kdu_stripe_compressor_new(&encoder)))
         goto done;
-    }
 
     // Encode frame
-    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream, planes))) {
+    if((ret = libkdu_do_encode_frame(avctx, frame, pix_fmt_desc, encoder, code_stream, planes)))
         goto done;
-    }
 
     // Retrieve encoded data
     kdu_compressed_target_bytes(target, &buffer, &buf_sz);
