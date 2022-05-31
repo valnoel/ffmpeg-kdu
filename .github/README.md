@@ -70,6 +70,14 @@ ffmpeg -c:v libkdu [kdu_option_1, kdu_option_2, ...] [-kdu_params "param_1 param
   kdu_params: see kdu_params.h in the Kakadu SDK documentation.
 ```
 
+## Tests
+
+The script at [.github/tests.sh](./.github/tests.sh) can be used for smoke
+testing:
+
+`./.github/tests.sh <path to source image dir>`
+
+where the source images can be retrieved at `s3://ffmpeg-kdu/tests/`.
 
 ## Directory layout
 
