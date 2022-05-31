@@ -157,7 +157,7 @@ static enum AVPixelFormat guess_pixel_format(AVCodecContext* avctx,
 
 static av_cold int libkdu_decode_init(AVCodecContext *avctx)
 {
-     LibKduContext *ctx = avctx->priv_data;
+    LibKduContext *ctx = avctx->priv_data;
 
     kdu_stripe_decompressor_options_init(&ctx->decompressor_opts);
 
@@ -200,14 +200,12 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
     // Declare the source buffer
-    if ((ret = kdu_compressed_source_buffered_new(buf, buf_size, &source))) {
+    if ((ret = kdu_compressed_source_buffered_new(buf, buf_size, &source)))
         goto done;
-    }
 
     // Create a code stream from the source buffer
-    if ((ret = kdu_codestream_create_from_source(source, &code_stream))) {
+    if ((ret = kdu_codestream_create_from_source(source, &code_stream)))
         goto done;
-    }
 
     // Apply input levels restrictions
     kdu_codestream_discard_levels(code_stream, ctx->decompressor_opts.reduce);
@@ -230,33 +228,29 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
     // Set the output frame width and height
-    if ((ret = ff_set_dimensions(avctx, stripe_widths[0], stripe_heights[0])) < 0) {
+    if ((ret = ff_set_dimensions(avctx, stripe_widths[0], stripe_heights[0])) < 0)
         goto done;
-    }
 
     // Get component sub-sampling ratios:
-    for (int i = 0; i < nb_components; ++i) {
+    for (int i = 0; i < nb_components; ++i)
         kdu_codestream_get_subsampling(code_stream, i, &component_sampling_x[i], &component_sampling_y[i]);
-    }
 
     // guess pixel format
-    if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE)
         avctx->pix_fmt = guess_pixel_format(avctx, nb_components, component_bit_depth, component_sampling_x, component_sampling_y);
-    }
+
     if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
         av_log(avctx, AV_LOG_ERROR, "Could not to identify the input pixel format");
         goto done;
     }
 
     // Initialize the decompressor
-    if (ret = kdu_stripe_decompressor_new(&decompressor)) {
+    if (ret = kdu_stripe_decompressor_new(&decompressor))
         goto done;
-    }
 
     // Initialize the output picture buffer
-    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0) {
+    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
         goto done;
-    }
 
 
     planes = av_pix_fmt_count_planes(avctx->pix_fmt);
@@ -280,14 +274,12 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     switch (component_bit_depth) {
         case 8:
             if (planes > 1) {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_decompressor_pull_stripe_planar(decompressor, frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions, NULL);
-                }
             } else {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_decompressor_pull_stripe(decompressor, frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps, stripe_precisions,
                                                                NULL);
-                }
             }
             break;
         case 9:
@@ -296,15 +288,13 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
         case 14:
         case 16:
             if (planes > 1) {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_decompressor_pull_stripe_planar_16(decompressor, (int16_t**) frame->data, stripe_heights, NULL, stripe_row_gaps, stripe_precisions,
                                                                          (const bool*) stripe_signed, NULL);
-                }
             } else {
-                while (!stop) {
+                while (!stop)
                     stop = kdu_stripe_decompressor_pull_stripe_16(decompressor, (int16_t*) frame->data[0], stripe_heights, NULL, NULL, stripe_row_gaps,
                                                                   stripe_precisions, (const bool*) stripe_signed, NULL);
-                }
             }
             break;
         default:avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
@@ -313,9 +303,8 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     }
 
     // End decoding the stripes
-    if((ret = kdu_stripe_decompressor_finish(decompressor))) {
+    if((ret = kdu_stripe_decompressor_finish(decompressor)))
         goto done;
-    }
 
     *got_frame = 1;
 
