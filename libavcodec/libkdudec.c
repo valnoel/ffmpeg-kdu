@@ -257,11 +257,11 @@ static int libkdu_decode_frame(AVCodecContext *avctx, AVFrame *frame, int *got_f
     pix_fmt_desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
     for (int i = 0; i < nb_components; ++i) {
-        if (component_bit_depth <= 8)
+        if (component_bit_depth <= 8) {
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
-        else if (component_bit_depth <= 16)
+        } else if (component_bit_depth <= 16) {
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
-        else {
+        } else {
             avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
             ret = AVERROR_PATCHWELCOME;
             goto done;

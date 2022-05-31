@@ -72,11 +72,11 @@ static int libkdu_do_encode_frame(AVCodecContext *avctx, const AVFrame *frame, c
         libkdu_get_component_dimensions(avctx, i, &stripe_heights[i], NULL);
 
         stripe_precisions[i] = pix_fmt_desc->comp[i].depth;
-        if (component_bit_depth <= 8)
+        if (component_bit_depth <= 8) {
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane];
-        else if (component_bit_depth <= 16)
+        } else if (component_bit_depth <= 16) {
             stripe_row_gaps[i] = frame->linesize[pix_fmt_desc->comp[i].plane] >> 1;
-        else {
+        } else {
             avpriv_report_missing_feature(avctx, "Pixel component bit-depth %d", component_bit_depth);
             return AVERROR_PATCHWELCOME;
         }
@@ -262,7 +262,9 @@ static int libkdu_encode_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFra
         goto done;
 
     for (int i = 0; i < KAKADU_MAX_GENERIC_PARAMS; ++i) {
-        if (ctx->kdu_generic_params[i] != NULL && (ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i])))
+        if (!ctx->kdu_generic_params[i])
+            continue;
+        if ((ret = kdu_codestream_parse_params(code_stream, ctx->kdu_generic_params[i])))
             goto done;
     }
 
