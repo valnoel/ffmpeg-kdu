@@ -81,7 +81,7 @@ where the source images can be retrieved at `s3://ffmpeg-kdu/tests/`.
 
 ## Directory layout
 
-The layout is identical to `usptream` with the following exception:
+The layout is identical to `upstream` with the following exception:
 
 * `.github` for files specific to FFmpeg-KDU
 
